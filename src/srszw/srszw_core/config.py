@@ -1,137 +1,287 @@
-"""
-配置管理模块
+"""Legacy-compatible configuration and packaged conversion-resource loading.
+
+The public conversion defaults use clearly named JSON assets bundled with the
+package. Historical configuration-field spellings remain only to preserve the
+legacy VVProj-export compatibility path.
 """
 
+from __future__ import annotations
+
 import json
-import os
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field, fields
+from importlib import resources
+from pathlib import Path
+from typing import Any, ClassVar, Self
+
+JsonMapping = dict[str, Any]
 
 
 @dataclass
 class Config:
-    """配置类，用于管理srszw的配置参数"""
+    """Configure the offline Chinese-to-VOICEVOX conversion process.
 
-    # 文件路径配置
-    file: str = "examples/example1.hooay-srszw.json"
-    output: str = "output/output.vvproj"
-    loaded_charactor_lists: List[str] = field(
-        default_factory=lambda: ["data/charactors/vvx.json"]
-    )
+    Conversion tables are bundled with :mod:`srszw` and are used by default.
+    Path fields are only needed to replace an individual bundled table or load
+    legacy character aliases from a local JSON file.
+    """
 
-    # 数据文件路径
-    yunMuSpliting: str = "data/yunMuSpliting/spliting.json"
-    zhengTiRenDu: str = "data/zhengTiRenDu/zhenTiRenDu.json"
-    shengDiao: str = "data/shengDiao/puTongHuaShengDiao.json"
-    shengYun: str = "data/shengYunConvInfo/zh_in_jp1.json"
-    kanaData: str = "data/kana.json"
+    file: Path = Path("examples/example1.hooay-srszw.json")
+    output: Path = Path("output/output.vvproj")
+    loaded_charactor_lists: list[Path] = field(default_factory=list)
 
-    # 处理参数
+    # ``None`` means the data table packaged in ``srszw.data``.
+    yunMuSpliting: Path | None = None
+    zhengTiRenDu: Path | None = None
+    shengDiao: Path | None = None
+    shengYun: Path | None = None
+    kanaData: Path | None = None
+
     noYW: bool = False
-    pitchRange: List[float] = field(default_factory=lambda: [5.5, 6.0])
+    pitchRange: tuple[float, float] = (5.5, 6.0)
     pitchRandom: float = 0.02
     lengthRandom: float = 0.001
 
-    # 加载的数据
-    _yunMuSplit_data: Optional[Dict] = None
-    _shengDiao_data: Optional[Dict] = None
-    _zhengTiRenDu_data: Optional[Dict] = None
-    _shengYun_data: Optional[Dict] = None
-    _kana_data: Optional[Dict] = None
-    _charactors_data: Optional[List[Dict]] = None
+    _yunMuSplit_data: JsonMapping | None = field(default=None, init=False, repr=False)
+    _shengDiao_data: list[Any] | None = field(default=None, init=False, repr=False)
+    _zhengTiRenDu_data: JsonMapping | None = field(default=None, init=False, repr=False)
+    _shengYun_data: JsonMapping | None = field(default=None, init=False, repr=False)
+    _kana_data: JsonMapping | None = field(default=None, init=False, repr=False)
+    _charactors_data: list[JsonMapping] | None = field(
+        default=None, init=False, repr=False
+    )
+
+    _RESOURCE_PACKAGE: ClassVar[str] = "srszw.data"
+    _DEFAULT_YUNMU_SPLITTING: ClassVar[str] = "pinyin_final_splitting.json"
+    _DEFAULT_ZHENGTI_RENDU: ClassVar[str] = "whole_syllable_pinyin.json"
+    _DEFAULT_SHENGDIAO: ClassVar[str] = "mandarin_tone_contours.json"
+    _DEFAULT_SHENGYUN: ClassVar[str] = "pinyin_to_voicevox_phonemes.json"
+    _DEFAULT_KANA: ClassVar[str] = "phoneme_to_katakana.json"
+    _DEFAULT_CHARACTORS: ClassVar[str] = "legacy/voicevox_speaker_aliases.json"
+    _PATH_FIELDS: ClassVar[tuple[str, ...]] = (
+        "file",
+        "output",
+        "yunMuSpliting",
+        "zhengTiRenDu",
+        "shengDiao",
+        "shengYun",
+        "kanaData",
+    )
+
+    def __post_init__(self) -> None:
+        for name in self._PATH_FIELDS:
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, Path):
+                setattr(self, name, Path(value))
+        self.loaded_charactor_lists = [
+            path if isinstance(path, Path) else Path(path)
+            for path in self.loaded_charactor_lists
+        ]
+        if len(self.pitchRange) != 2:
+            raise ValueError("pitchRange 必须恰好包含两个值")
+        self.pitchRange = (float(self.pitchRange[0]), float(self.pitchRange[1]))
+        if self.pitchRange[0] > self.pitchRange[1]:
+            raise ValueError("pitchRange 的最小值不能大于最大值")
+        if self.pitchRandom < 0:
+            raise ValueError("pitchRandom 不能为负数")
+        if self.lengthRandom < 0:
+            raise ValueError("lengthRandom 不能为负数")
 
     @classmethod
-    def from_file(cls, config_path: str = "config.json") -> "Config":
-        """从配置文件创建配置实例"""
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-            return cls(**config_data)
-        return cls()
+    def from_file(cls, config_path: str | Path = "config.json") -> Self:
+        """Create a configuration from a legacy-compatible JSON file.
 
-    def to_dict(self) -> Dict[str, Any]:
-        """将配置转换为字典"""
-        return {
-            "file": self.file,
-            "output": self.output,
-            "loaded_charactor_lists": self.loaded_charactor_lists,
-            "yunMuSpliting": self.yunMuSpliting,
-            "zhengTiRenDu": self.zhengTiRenDu,
-            "shengDiao": self.shengDiao,
-            "shengYun": self.shengYun,
+        Relative paths inside the file are resolved from the file's parent
+        directory. If the file does not exist, a configuration using bundled
+        data is returned, preserving the previous command-line behaviour.
+        """
+
+        path = Path(config_path)
+        if not path.exists():
+            return cls()
+
+        with path.open(encoding="utf-8") as file:
+            raw_config = json.load(file)
+        if not isinstance(raw_config, dict):
+            raise ValueError(f"配置文件必须是 JSON 对象: {path}")
+
+        allowed_fields = {
+            item.name for item in fields(cls) if not item.name.startswith("_")
+        }
+        unsupported_fields = set(raw_config).difference(allowed_fields)
+        if unsupported_fields:
+            names = ", ".join(sorted(unsupported_fields))
+            raise ValueError(f"配置文件包含未知字段: {names}")
+
+        values: dict[str, Any] = dict(raw_config)
+        for name in set(cls._PATH_FIELDS).intersection(values):
+            if values[name] is not None:
+                values[name] = cls._resolve_config_path(values[name], path.parent)
+
+        if "loaded_charactor_lists" in values:
+            entries = values["loaded_charactor_lists"]
+            if not isinstance(entries, list):
+                raise ValueError("loaded_charactor_lists 必须是路径列表")
+            values["loaded_charactor_lists"] = [
+                cls._resolve_config_path(entry, path.parent) for entry in entries
+            ]
+
+        if "pitchRange" in values:
+            pitch_range = values["pitchRange"]
+            if not isinstance(pitch_range, list | tuple):
+                raise ValueError("pitchRange 必须是数值列表")
+            values["pitchRange"] = tuple(pitch_range)
+
+        return cls(**values)
+
+    @staticmethod
+    def _resolve_config_path(value: object, base_directory: Path) -> Path:
+        if not isinstance(value, str):
+            raise ValueError("配置中的文件路径必须是字符串")
+        candidate = Path(value)
+        return candidate if candidate.is_absolute() else base_directory / candidate
+
+    def to_dict(self) -> JsonMapping:
+        """Return a JSON-serializable representation of this configuration."""
+
+        result: JsonMapping = {
+            "file": str(self.file),
+            "output": str(self.output),
+            "loaded_charactor_lists": [
+                str(path) for path in self.loaded_charactor_lists
+            ],
             "noYW": self.noYW,
-            "pitchRange": self.pitchRange,
+            "pitchRange": list(self.pitchRange),
             "pitchRandom": self.pitchRandom,
             "lengthRandom": self.lengthRandom,
         }
+        for name in (
+            "yunMuSpliting",
+            "zhengTiRenDu",
+            "shengDiao",
+            "shengYun",
+            "kanaData",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = str(value)
+        return result
 
-    def save(self, config_path: str = "config.json"):
-        """保存配置到文件"""
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+    def save(self, config_path: str | Path = "config.json") -> None:
+        """Save the configuration as UTF-8 JSON."""
 
-    def load_data_files(self):
-        """加载所有数据文件"""
-        self._yunMuSplit_data = self._load_json(self.yunMuSpliting)
-        self._shengDiao_data = self._load_json(self.shengDiao)
-        self._zhengTiRenDu_data = self._load_json(self.zhengTiRenDu)
-        self._shengYun_data = self._load_json(self.shengYun)
-        self._kana_data = self._load_json(self.kanaData)
+        with Path(config_path).open("w", encoding="utf-8") as file:
+            json.dump(self.to_dict(), file, indent=2, ensure_ascii=False)
 
-        # 加载角色数据
-        self._charactors_data = []
-        for charactor_file in self.loaded_charactor_lists:
-            self._charactors_data.append(self._load_json(charactor_file))
+    def load_data_files(self) -> None:
+        """Load conversion tables, using bundled resources unless overridden."""
 
-    def _load_json(self, file_path: str) -> Dict:
-        """加载JSON文件"""
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        raise FileNotFoundError(f"文件不存在: {file_path}")
+        self._yunMuSplit_data = self._load_mapping(
+            self.yunMuSpliting, self._DEFAULT_YUNMU_SPLITTING
+        )
+        self._shengDiao_data = self._load_list(self.shengDiao, self._DEFAULT_SHENGDIAO)
+        self._zhengTiRenDu_data = self._load_mapping(
+            self.zhengTiRenDu, self._DEFAULT_ZHENGTI_RENDU
+        )
+        self._shengYun_data = self._load_mapping(self.shengYun, self._DEFAULT_SHENGYUN)
+        self._kana_data = self._load_mapping(self.kanaData, self._DEFAULT_KANA)
+
+        if self.loaded_charactor_lists:
+            self._charactors_data = [
+                self._load_mapping(path, self._DEFAULT_CHARACTORS)
+                for path in self.loaded_charactor_lists
+            ]
+        else:
+            self._charactors_data = [self._load_mapping(None, self._DEFAULT_CHARACTORS)]
+
+    @classmethod
+    def _load_json(cls, path: Path | None, default_resource: str) -> object:
+        if path is not None:
+            try:
+                with path.open(encoding="utf-8") as file:
+                    return json.load(file)
+            except FileNotFoundError as error:
+                raise FileNotFoundError(f"文件不存在: {path}") from error
+
+        try:
+            content = (
+                resources.files(cls._RESOURCE_PACKAGE)
+                .joinpath(default_resource)
+                .read_text(encoding="utf-8")
+            )
+        except FileNotFoundError as error:
+            raise FileNotFoundError(
+                f"未找到内置转换数据: {default_resource}"
+            ) from error
+        return json.loads(content)
+
+    @classmethod
+    def _load_mapping(cls, path: Path | None, default_resource: str) -> JsonMapping:
+        data = cls._load_json(path, default_resource)
+        if not isinstance(data, dict):
+            raise ValueError(f"转换数据必须是 JSON 对象: {default_resource}")
+        return data
+
+    @classmethod
+    def _load_list(cls, path: Path | None, default_resource: str) -> list[Any]:
+        data = cls._load_json(path, default_resource)
+        if not isinstance(data, list):
+            raise ValueError(f"转换数据必须是 JSON 数组: {default_resource}")
+        return data
 
     @property
-    def yunMuSplit(self) -> Dict:
-        """获取韵母拆分数据"""
+    def yunMuSplit(self) -> JsonMapping:
+        """The vowel-splitting conversion table."""
+
         if self._yunMuSplit_data is None:
             self.load_data_files()
+        assert self._yunMuSplit_data is not None
         return self._yunMuSplit_data
 
     @property
-    def shengDiao_data(self) -> Dict:
-        """获取声调数据"""
+    def shengDiao_data(self) -> list[Any]:
+        """The Mandarin tone contour conversion table."""
+
         if self._shengDiao_data is None:
             self.load_data_files()
+        assert self._shengDiao_data is not None
         return self._shengDiao_data
 
     @property
-    def zhengTiRenDu_data(self) -> Dict:
-        """获取整体认读数据"""
+    def zhengTiRenDu_data(self) -> JsonMapping:
+        """The whole-syllable recognition conversion table."""
+
         if self._zhengTiRenDu_data is None:
             self.load_data_files()
+        assert self._zhengTiRenDu_data is not None
         return self._zhengTiRenDu_data
 
     @property
-    def shengYun_data(self) -> Dict:
-        """获取声韵数据"""
+    def shengYun_data(self) -> JsonMapping:
+        """The initial/final to mora conversion table."""
+
         if self._shengYun_data is None:
             self.load_data_files()
+        assert self._shengYun_data is not None
         return self._shengYun_data
 
     @property
-    def kana(self) -> Dict:
-        """获取假名数据"""
+    def kana(self) -> JsonMapping:
+        """The phoneme-to-katakana conversion table."""
+
         if self._kana_data is None:
             self.load_data_files()
+        assert self._kana_data is not None
         return self._kana_data
 
     @property
-    def charactors(self) -> List[Dict]:
-        """获取角色数据"""
+    def charactors(self) -> list[JsonMapping]:
+        """Legacy character alias tables used only for VVProj export."""
+
         if self._charactors_data is None:
             self.load_data_files()
+        assert self._charactors_data is not None
         return self._charactors_data
 
 
-# 默认配置实例
+# Compatibility export for callers that imported this name from earlier versions.
 default_config = Config()

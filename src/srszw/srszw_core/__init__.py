@@ -1,12 +1,8 @@
-"""
-srszw_core - VOICEVOX中文跨语种自动生成核心模块
-
-提供将中文文本转换为VOICEVOX项目文件的核心功能。
-"""
+"""Compatibility namespace for legacy project export helpers."""
 
 from .config import Config
-from .converter import SRSZWConverter
+from .converter import ConversionError, SRSZWConverter
 from .utils import generate_from_string
 
 __version__ = "0.1.0"
-__all__ = ["Config", "SRSZWConverter", "generate_from_string"]
+__all__ = ["Config", "ConversionError", "SRSZWConverter", "generate_from_string"]

@@ -1,185 +1,125 @@
-# VOICEVOX 中文跨语种自动生成脚本
+# SRSZW
 
-## 介绍
+SRSZW 是一个面向 Python 3.12 及以上版本的轻量级库和命令行工具：它将中文转换为适用于 VOICEVOX Engine 的音高短语，再直接调用 Engine 合成 WAV 音频。
 
-可使用拼音或汉字自动生成 VOICEVOX 中文跨语种调声
-
-## 预编译版本
+> 当前版本：`0.2.0`（开发中）
 >
-> 仅有 Windows, Linux, MacOS 的 x86_64 的预编译版本
+> 已验证 Engine：VOICEVOX Engine `0.25.2`
+>
+> 当前范围：离线中文韵律转换、直接 TTS、诊断查询及 Engine 角色查询。可编辑 `.vvproj` 导出和反向代理将在后续版本提供。
 
-- GitHub:
-- - Windows: [下载](https://github.com/hooay233/srszw/releases/download/v0.1/srszw-0.1-win-built.zip)
-- - Linux: [下载](https://github.com/hooay233/srszw/releases/download/v0.1/srszw-0.1-gnu-built.zip)
-- - MacOS: [下载](https://github.com/hooay233/srszw/releases/download/v0.1/srszw-0.1-mac-built.zip)
-- Gitee(中国大陆用户在这下载):
-- - Windows: [下载](https://gitee.com/hooay233/srszw-script/releases/download/v0.1/srszw-0.1-win-built.zip)
-- - Linux: [下载](https://gitee.com/hooay233/srszw-script/releases/download/v0.1/srszw-0.1-gnu-built.zip)
-- - MacOS: [下载](https://gitee.com/hooay233/srszw-script/releases/download/v0.1/srszw-0.1-mac-built.zip)
+## 不包含的功能
 
-下载并解压后，运行名为 web-ui 的可执行文件，或运行名为 tk_ui 的可执行文件，来启动图形化界面
-也可运行名为 srszw 的可执行文件，不启动图形化界面，参考 [这个](#生成自己的文本的跨语种)
-若无法运行，可尝试 [下面](#使用方法) 的方法运行
+- 不提供 Web、Tk 或其他桌面 GUI。
+- 不捆绑、下载或分发 VOICEVOX Engine、模型或角色音源。
+- 不承诺将中文变为自然的日语语音；本项目通过日语音素与音高曲线近似表达中文声调。
 
-## 使用方法
+## 前置条件
 
-### 下载项目
+1. 安装 Python 3.12 或更高版本。
+2. 安装 [uv](https://docs.astral.sh/uv/)。
+3. 单独启动一个兼容的 VOICEVOX Engine。默认地址为 `http://127.0.0.1:50021`。
 
-1. 点击 [这里](https://gitee.com/hooay233/srszw-script/repository/archive/master.zip) 下载 zip
-2. 解压 zip
+## 安装与开发环境
 
-### 安装依赖
+克隆仓库后，在 Windows `cmd.exe` 中执行：
 
-1. 安装 [Python3](https://python.org)
-2. 安装 pypinyin
-在终端输入 `pip install pypinyin` 安装
-
-### 运行
-
-1. 运行 `srszw.py`
-2. 用 VOICEVOX 打开 `output/output.vvproj`，如果能够正常打开，则说明生成成功
-
-## 生成自己的文本的跨语种
-
-### 1. 复制一份空模板
-
-复制 `./examples/empty.hooay-srszw.json` ，重命名为 `你的文件名.hooay-srszw.json`
-
-### 2. 通过模板编辑
-
-打开 `你的文件名.hooay-srszw.json`，然后你将看到：
-
-```json
-{
- "script_version": "0.1",
- "app_version": "0.23.0",
- "talk": [
-  {
-   "charactor":"shikokumetan",
-   "style": null,
-   "speedScale": 1,
-   "pitchScale": 0,
-   "intonationScale": 1,
-   "volumeScale": 1,
-   "prePhonemeLength": 0.1,
-   "postPhonemeLength": 0.1,
-   "pauseLengthScale": 1,
-   "text": {
-    "pinyin": null,
-    "zi": "你要生成的文字"
-   }
-  }
- ]
-}
+```cmd
+uv sync --all-groups
 ```
 
-一下是对各个项的解释：
+开发时运行质量检查：
 
-- `script_version`: 脚本版本，目前没有用
-- `app_version`: VOICEVOX 版本，一般情况下不需要修改
-- `talk`: 文本列表，存储每一个台词的信息，用 `,` 分割每个台词，用  `{` 和 `}` 包含每个台词
-- - `charactor`: 角色名，通常是角色名的罗马字，详见：`./charactors/vvx.json`
-- - `style`: 声线，除 `normal` 代表 `ノーマル` 外，其他都是声线的罗马字，详见：`./charactors/vvx.json`
-- - `speedScale`: 语速
-- - `pitchScale`: 音高
-- - `intonationScale`: 抑扬
-- - `volumeScale`: 音量
-- - `prePhonemeLength`: 开始无音
-- - `postPhonemeLength`: 终了无音
-- - `pauseLengthScale`: 停顿长度
-- - `text`: 台词的内容
-- - - `pinyin`: 拼音，如果为`null`，则使用 `zi` 的值，否则使用 `pinyin` 的值，拼音用空格分割
-- - - `zi`: 汉字，如果 `pinyin` 为`null`，则使用 `zi` 的值，否则使用 `pinyin` 的值，
-同时也是在 VOICEVOX 中显示的台词文本，可以混用拼音和汉字，拼音用空格分割，一句台词的开头不能有标点符号
-
-修改之后保存
-
-### 3. 更改配置文件
-
-打开 `config.json`，你将看到：
-
-```json
-{
- "file": "./examples/example1.hooay-srszw.json",
- "output": "./output/output.vvproj",
- "loaded_charactor_lists": [
-  "./charactors/vvx.json"
- ],
- "yunMuSpliting": "./yunMuSpliting/spliting.json",
- "zhengTiRenDu": "./zhengTiRenDu/zhenTiRenDu.json",
- "shengDiao": "./shengDiao/puTongHuaShengDiao.json",
- "shengYun": "./shengYunConvInfo/zh_in_jp1.json",
- "noYW": false,
- "pitchRange": [5.0, 6.0],
- "pitchRandom": 0.02,
- "lengthRandom": 0.001
-}
+```cmd
+uv run ruff check . && uv run pyright && uv run pytest
 ```
 
-以下是对各个项的解释：
+安装为普通 Python 包：
 
-- `file`: 修改为你保存的 `.hooay-srszw.json` 文件的路径
-- `output`: 输出的 VOICEVOX 项目文件的位置
-- `loaded_charactor_lists`: 角色列表，默认只有 `vvx.json`，可添加其他基于 VOICEVOX 的引擎（例如 VOICEVOX NEMO）中的角色，需要自己转写，如果不需要其他引擎的角色，则不要修改
-- `yunMuSpliting`: 韵母拆分文件，一般不需要修改
-- `zhengTiRenDu`: 储存整体认读的文件，一般不需要修改
-- `shengDiao`: 储存声调相对音高信息的文件，一般不需要修改
-- `shengYun`: 储存声韵转换信息的文件，一般不需要修改
-- `noYW`: 不将 `y` 和 `w` 视为声母，为 `true` 时，不将 `y` 和 `w` 视为声母（事实上这个还有问题），为 `false` 时，将 `y` 和 `w` 视为声母
-- `pitchRange`: 声调相对音高的范围
-- `pitchRandom`: 音高的随机偏移
-- `lengthRandom`: 音素长度的随机偏移
-
-修改之后保存
-
-### 4. 运行
-
-1. 运行 `python srszw.py`
-2. 用 VOICEVOX 打开输出的文件，如果能够正常打开，则说明生成成功
-
-## 新的使用方式
-
-### 命令行直接转换文本
-
-```bash
-# 直接转换文本
-python srszw.py --text "你好，这是测试文本" --output output/test.vvproj
-
-# 指定角色和声线
-python srszw.py --text "你好" --charactor zundamon --style normal --output output/test.vvproj
+```cmd
+uv pip install .
 ```
 
-### Python API 使用
+## 命令行
+
+所有命令都可在 Windows `cmd.exe` 中单行执行。未指定 `--engine-url` 时会连接默认的本地 Engine。
+
+### 查看角色与 style ID
+
+```cmd
+uv run srszw speakers
+```
+
+每行按 `style ID`、风格名称、角色名称输出。直接合成时，`--speaker` 必须使用这里返回的整数 style ID。
+
+### 直接合成 WAV
+
+```cmd
+uv run srszw synthesize --text "你好，世界。" --speaker 2 --output hello.wav
+```
+
+可以调节常用语音参数：
+
+```cmd
+uv run srszw synthesize --text "你好，世界。" --speaker 2 --output hello.wav --speed-scale 1.05 --pitch-scale 0.0 --seed 7
+```
+
+也可以从 UTF-8 文本文件读取内容：
+
+```cmd
+uv run srszw synthesize --text-file input.txt --speaker 2 --output hello.wav
+```
+
+为防止误覆盖，已有输出文件会使命令失败；明确覆盖时追加 `--force`。
+
+### 查看生成的 AudioQuery
+
+此命令不访问 Engine，只输出本地中文转换得到的 Engine 请求 JSON：
+
+```cmd
+uv run srszw query --text "你好，世界！" --seed 7 > query.json
+```
+
+## Python API
 
 ```python
-from srszw_core import generate_from_string, generate_and_save
+from pathlib import Path
 
-# 生成VOICEVOX项目数据
-vvproj_data = generate_from_string("你好，世界！", charactor="shikokumetan")
+from srszw import ChineseSynthesizer, SynthesisOptions, VoicevoxClient
 
-# 直接生成并保存文件
-generate_and_save("你好，世界！", "output/test.vvproj", charactor="zundamon")
+options = SynthesisOptions(speed_scale=1.05)
+with VoicevoxClient("http://127.0.0.1:50021") as client:
+    synthesizer = ChineseSynthesizer(client, seed=7)
+    wav = synthesizer.synthesize("你好，世界。", speaker=2, options=options)
+
+Path("hello.wav").write_bytes(wav)
 ```
 
-## 图形化界面
+如果只需要检查离线转换结果，可调用 `build_audio_query()` 或 `generate_accent_phrases()`；二者都不需要运行 Engine。
 
-### webui
+```python
+from srszw import build_audio_query
 
-1. 安装webui2
-运行 `pip install webui2` 进行安装
-2. 运行
-`python web-ui.py`
+query = build_audio_query("你好，世界！", seed=7)
+print(query["accent_phrases"])
+```
 
-### tkinter
+## 数据与迁移
 
-运行 `python tk_ui.py`，有的系统可能要先安装tkinter
+转换数据只随包发布，位于 [`src/srszw/data/`](src/srszw/data/)；项目根目录不再保留重复的 `data/` 副本。包内资源采用描述性英文名称，例如 [`pinyin_to_voicevox_phonemes.json`](src/srszw/data/pinyin_to_voicevox_phonemes.json) 和 [`mandarin_tone_contours.json`](src/srszw/data/mandarin_tone_contours.json)。
 
-> 注：
->
-> - 有些浏览器的单独窗口运行无法弹出弹窗，可以复制终端中的链接用浏览器正常模式下打开
-> - 如果生成的朗读起来声音沙哑或无法发声，可尝试修改“音高”和“抑扬”
-> - 图形化界面的前端是我使用 AI 生成的，并手动修改 bug
-> - 本人代码水平并不好，欢迎批评，但也请保持友善
->
-----------
-> 本项目使用 WTFPL 协议，属于自由软件，可以自由使用，无需署名或专门授权。但该项目只负责生成项目文件，若使用 VOICEVOX 一类软件合成音频，仍需要遵循其协议
+根目录的 [`config.json`](config.json) 已改为只保存旧工程导出所需的示例参数，默认使用包内转换数据。旧 `.hooay-srszw.json`、`charactor` 参数拼写和扁平命令行仍暂作为兼容层保留；新代码请使用本文档中的子命令和公开 Python API。
+
+## 开发与测试
+
+离线测试默认不会连接 Engine。要执行真实集成测试，在 `cmd.exe` 中设置地址后运行：
+
+```cmd
+set VVENGINE_URL=http://127.0.0.1:50021 && uv run pytest -m integration
+```
+
+测试覆盖离线转换、资源加载、HTTP MockTransport、CLI 文件输入和本机 Engine 的 WAV 合成闭环。
+
+## 许可证与 VOICEVOX
+
+本项目采用 [WTFPL](LICENSE)。使用 VOICEVOX 或其他语音引擎、模型和角色时，仍须遵守它们各自的许可证、角色使用条款和相关规范。

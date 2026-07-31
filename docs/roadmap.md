@@ -143,6 +143,19 @@ synthesizer.export_project(
 
 验收：离线测试不依赖 50021 端口，且现有样例转换可稳定通过。
 
+### M0/M1 实施记录（2026-07-31）
+
+已完成本轮离线核心重构，作为后续 M2 的稳定输入边界：
+
+- 新增公开 [`generate_accent_phrases()`](../src/srszw/__init__.py:22)，用于仅依赖本地资源的中文到 VVProj 风格 `accentPhrases` 转换；`seed` 可固定时值、音高偏移及旧工程 UUID。
+- 将全部转换 JSON 移入 [`src/srszw/data/`](../src/srszw/data/)，并由 [`Config.load_data_files()`](../src/srszw/srszw_core/config.py:174) 通过 `importlib.resources` 加载；资源使用 [`pinyin_to_voicevox_phonemes.json`](../src/srszw/data/pinyin_to_voicevox_phonemes.json) 等描述性英文名称，项目根目录不再保留重复 `data/` 目录。默认转换不再依赖项目根目录或运行时工作目录。
+- 保留 [`srszw.srszw_core`](../src/srszw/srszw_core/__init__.py) 和旧 `charactor` 参数作为工程导出兼容层；其输出目录会自动创建。新功能不应继续扩展该遗留 API。
+- 在 [`pyproject.toml`](../pyproject.toml) 中建立 uv 开发依赖及 Ruff、Pyright、Pytest 配置，并修正子包发现与 JSON 包数据声明；M2 基线版本更新为 `0.2.0`。
+- 新增离线回归测试，覆盖内置资源、seed 可重现性、标点、异常、旧配置相对路径和过渡 CLI。
+- 已通过 Ruff、Pyright、7 个 Pytest 用例、源码/轮子构建及隔离 wheel 安装后、非仓库目录资源加载验证；测试不连接 50021 Engine。
+
+下一步进入 M2：以本轮 [`generate_accent_phrases()`](../src/srszw/__init__.py:22) 输出为输入，设计并实现基于 `httpx` 的 `VoicevoxClient`、`AudioQuery` 组装和 `/synthesis` WAV 端到端集成测试。
+
 ### M1：核心转换器与数据资源化
 
 目标是把中文转换结果从旧 `.vvproj` 组装逻辑中剥离出来。
@@ -155,6 +168,18 @@ synthesizer.export_project(
 
 验收：在空临时目录执行已安装的包，仍可从中文文本得到结构有效的 `accentPhrases`。
 
+### M2 实施记录（2026-07-31）
+
+已完成直接 TTS Engine 客户端闭环：
+
+- 新增 [`srszw.models`](../src/srszw/models.py) 公开 TypedDict 模型。实测确认 Engine 0.25.2 HTTP 契约是混合命名：顶层 `speedScale` / `prePhonemeLength` 等为 camelCase，嵌套的 `accent_phrases` / `pause_mora` / `consonant_length` / `vowel_length` 为 snake_case；模型已按实测契约定义。
+- 新增 [`srszw.engine`](../src/srszw/engine.py) 的同步 [`VoicevoxClient`](../src/srszw/engine.py:38)：自行拼装绝对 URL（不依赖外部 client base_url），提供 `version()`、`speakers()`、`speaker_info()`、`synthesis()`、`audio_query()`；连接错误与 HTTP 错误分别封装为 [`EngineError`](../src/srszw/engine.py:21) / [`EngineHTTPError`](../src/srszw/engine.py:27)。
+- 新增 [`srszw.api`](../src/srszw/api.py) 的 [`SynthesisOptions`](../src/srszw/api.py:33)、[`build_audio_query()`](../src/srszw/api.py:100) 与 [`ChineseSynthesizer`](../src/srszw/api.py:139)（`prepare_query` / `synthesize` / `synthesize_to_file`），完成 M1 camelCase 韵律到 Engine snake_case 请求的转换。
+- CLI 子命令化：`srszw synthesize`、`srszw speakers`、`srszw query` 已落地于 [`srszw.cli`](../src/srszw/cli.py)，旧 flat 参数自动回退到兼容模式并提示迁移；`synthesize` 支持互斥的 `--text` / `--text-file`，并默认拒绝覆盖已有输出，除非显式指定 `--force`。
+- 新增 httpx MockTransport 单测与 `integration` 标记的真实 Engine 测试。已在本机 `127.0.0.1:50021` 端到端验证：`srszw synthesize --text "你好，世界。..." --speaker 3` 产出 283KB RIFF/WAVE 文件；`VVENGINE_URL` 集成测试通过。无效 JSON 响应会被封装为明确的 [`EngineProtocolError`](../src/srszw/engine.py:39)。
+
+下一步进入 M3：以 [`build_audio_query()`](../src/srszw/api.py:100) 为共享韵律来源，实现版本化 `VVProjExporter` 与 `export-project` 子命令，并重写 README。
+
 ### M2：直接 TTS Engine 客户端
 
 目标是产出 WAV，而不要求用户打开 GUI 或手工导入工程。
@@ -163,7 +188,7 @@ synthesizer.export_project(
 - 实现 `ChineseSynthesizer.prepare_query()`、`synthesize()`、`synthesize_to_file()`；将本地构造的查询 POST 到 `/synthesis`。
 - 以 `/speakers` 查询实际 style ID；CLI 增加 `speakers`，废除把过期静态角色表当作 Engine 真相的做法。
 - 支持常用查询参数：速度、音高、抑扬、音量、前后无声、停顿、采样率和立体声。
-- 加入真实 Engine 集成测试标记，默认跳过；当 `SRSZW_ENGINE_URL` 存在时，对本机 0.25.2 执行“中文 -> 查询 -> synthesis -> RIFF/WAVE 文件头”的端到端测试。
+- 加入真实 Engine 集成测试标记，默认跳过；当 `VVENGINE_URL` 存在时，对本机 0.25.2 执行“中文 -> 查询 -> synthesis -> RIFF/WAVE 文件头”的端到端测试。
 
 验收：`srszw synthesize --text "你好，世界。" --speaker 3 --output hello.wav` 在当前 50021 引擎可生成非空 WAV。
 

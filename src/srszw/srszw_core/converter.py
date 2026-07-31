@@ -1,184 +1,273 @@
-"""
-核心转换器模块
-包含将中文文本转换为VOICEVOX项目文件的核心逻辑
-"""
+"""Offline Chinese-to-VOICEVOX accent-phrase conversion."""
 
-import random as rd
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+import random
+from collections.abc import Sequence
+from typing import Any
 
 import pypinyin as pypy
 import pypinyin.contrib.tone_convert as pypytc
 
 from .config import Config
 
+JsonObject = dict[str, Any]
+Mora = JsonObject
+AccentPhrase = JsonObject
+
+_PUNCTUATION = frozenset(
+    ",./<>?:;'\"[]{}!@#$%^&*()_+~`=-|\\，。《》？：；‘’【】！￥……（）——+｜\\·「」、"
+)
+
+
+class ConversionError(ValueError):
+    """Raised when text cannot be represented with the bundled conversion data."""
+
 
 class SRSZWConverter:
-    """VOICEVOX中文跨语种转换器"""
+    """Convert Mandarin Chinese text into VOICEVOX-compatible accent phrases.
 
-    def __init__(self, config: Optional[Config] = None):
+    The converter is offline: it loads tables packaged with SRSZW and never
+    contacts a VOICEVOX Engine. Pass ``seed`` to make its optional timing and
+    pitch variation reproducible.
+    """
+
+    def __init__(
+        self, config: Config | None = None, *, seed: int | None = None
+    ) -> None:
         self.config = config or Config()
         self.config.load_data_files()
+        self._random = random.Random(seed)
+        self._seed = seed
 
     def rand_len(self) -> float:
-        """生成随机长度偏移"""
-        return (self.config.lengthRandom * 2) * rd.random() - self.config.lengthRandom
+        """Return a configured random mora-duration offset."""
+
+        return self._random.uniform(-self.config.lengthRandom, self.config.lengthRandom)
 
     def rand_pit(self) -> float:
-        """生成随机音高偏移"""
-        return (self.config.pitchRandom * 2) * rd.random() - self.config.pitchRandom
+        """Return a configured random pitch offset."""
 
-    def get_sheng_yun(self, pinyin: str) -> List[Optional[str]]:
-        """获取声韵"""
-        result = [None]
-        try:
-            # 尝试整体认读
-            normalized_pinyin = pypytc.to_normal(pypytc.to_normal(pinyin))
-            result = self.config.zhengTiRenDu_data[normalized_pinyin]
-            return result
-        except KeyError:
-            # 非整体认读音节，进行声韵拆分
-            pass
+        return self._random.uniform(-self.config.pitchRandom, self.config.pitchRandom)
 
-        # 获取声母
-        result[0] = pypytc.to_initials(pinyin, strict=self.config.noYW)
+    def get_sheng_yun(self, pinyin: str) -> list[str | None]:
+        """Split a numbered Pinyin syllable into initial and three finals."""
 
-        # 处理特殊韵母转换
+        normalized_pinyin = pypytc.to_normal(pinyin)
+        whole_syllable = self.config.zhengTiRenDu_data.get(normalized_pinyin)
+        if whole_syllable is not None:
+            return self._as_syllable(whole_syllable, pinyin)
+
+        initial = pypytc.to_initials(pinyin, strict=self.config.noYW)
         processed_pinyin = (
             pinyin.replace("ju", "jv")
             .replace("qu", "qv")
             .replace("xu", "xv")
             .replace("yu", "yv")
         )
+        final = pypytc.to_finals(processed_pinyin, strict=False)
+        try:
+            finals = self.config.yunMuSplit[final]
+        except KeyError as error:
+            raise ConversionError(
+                f"不支持的拼音韵母: {pinyin!r}（韵母 {final!r}）"
+            ) from error
 
-        # 获取韵母并进行拆分
-        finals = pypytc.to_finals(processed_pinyin, strict=False)
-        result += self.config.yunMuSplit[finals]
-
-        return result
+        return [initial or None, *self._as_finals(finals, pinyin)]
 
     @staticmethod
-    def first_vowel(convert_info: List) -> Any:
-        """获取第一个元音"""
-        if isinstance(convert_info[1][0], dict):
-            return convert_info[1][1]
-        else:
-            return convert_info[1][0]
+    def _as_syllable(value: object, pinyin: str) -> list[str | None]:
+        if not isinstance(value, list) or len(value) != 4:
+            raise ConversionError(f"整体认读数据格式无效: {pinyin!r}")
+        initial, *finals = value
+        if initial is not None and not isinstance(initial, str):
+            raise ConversionError(f"整体认读声母无效: {pinyin!r}")
+        return [initial, *SRSZWConverter._as_finals(finals, pinyin)]
 
-    def convert_to_moras(self, convert_info: List) -> List[Dict[str, Any]]:
-        """将声韵转换为日语音节"""
-        result = []
+    @staticmethod
+    def _as_finals(value: object, pinyin: str) -> list[str]:
+        if (
+            not isinstance(value, list)
+            or len(value) != 3
+            or not all(isinstance(item, str) for item in value)
+        ):
+            raise ConversionError(f"韵母拆分数据格式无效: {pinyin!r}")
+        return value
 
-        # 处理声母部分
-        if convert_info[0]:
-            for i in range(len(convert_info[0])):
-                result.append({})
-                result[-1]["consonant"] = convert_info[0][i][0]
-                result[-1]["consonantLength"] = convert_info[0][i][2] + self.rand_len()
+    @staticmethod
+    def first_vowel(convert_info: Sequence[object]) -> list[Any]:
+        """Return the first vowel conversion entry for a final."""
 
-                if convert_info[0][i][1]:
-                    result[-1]["vowel"] = convert_info[0][i][1]
-                    result[-1]["vowelLength"] = convert_info[0][i][3] + self.rand_len()
-                else:
-                    result[-1]["vowel"] = self.first_vowel(convert_info)[1]
-                    result[-1]["vowelLength"] = (
-                        convert_info[0][i][3] + self.rand_len()
-                        if convert_info[0][i][3]
-                        else self.first_vowel(convert_info)[3] + self.rand_len()
+        final_info = convert_info[1]
+        if not isinstance(final_info, list) or not final_info:
+            raise ConversionError("韵母转换数据为空")
+        first_entry = final_info[0]
+        entry = final_info[1] if isinstance(first_entry, dict) else first_entry
+        if not isinstance(entry, list) or len(entry) < 4:
+            raise ConversionError("韵母转换数据格式无效")
+        return entry
+
+    def convert_to_moras(self, convert_info: Sequence[object]) -> list[Mora]:
+        """Convert an initial/final conversion entry into VOICEVOX moras."""
+
+        if len(convert_info) != 2:
+            raise ConversionError("声韵转换数据必须包含声母和韵母")
+        initial_info, final_info = convert_info
+        if not isinstance(final_info, list) or not final_info:
+            raise ConversionError("韵母转换数据为空")
+
+        result: list[Mora] = []
+        if initial_info is not None:
+            if not isinstance(initial_info, list):
+                raise ConversionError("声母转换数据格式无效")
+            for entry in initial_info:
+                if not isinstance(entry, list) or len(entry) < 4:
+                    raise ConversionError("声母转换数据格式无效")
+                consonant, vowel, consonant_length, vowel_length = entry[:4]
+                if not isinstance(consonant, str) or not isinstance(
+                    consonant_length, int | float
+                ):
+                    raise ConversionError("声母转换数据格式无效")
+
+                resolved_vowel = vowel
+                resolved_vowel_length = vowel_length
+                if resolved_vowel is None:
+                    first_vowel = self.first_vowel(convert_info)
+                    resolved_vowel = first_vowel[1]
+                    resolved_vowel_length = (
+                        vowel_length if vowel_length is not None else first_vowel[3]
                     )
+                if not isinstance(resolved_vowel, str) or not isinstance(
+                    resolved_vowel_length, int | float
+                ):
+                    raise ConversionError("声母元音转换数据格式无效")
 
-                result[-1]["text"] = self.config.kana[
-                    result[-1]["consonant"] + result[-1]["vowel"]
-                ]
+                result.append(
+                    {
+                        "consonant": consonant,
+                        "consonantLength": consonant_length + self.rand_len(),
+                        "vowel": resolved_vowel,
+                        "vowelLength": resolved_vowel_length + self.rand_len(),
+                        "text": self._kana_for(consonant, resolved_vowel),
+                    }
+                )
 
-        # 处理韵母部分
-        if isinstance(convert_info[1][0], dict):
-            loop_times = convert_info[1][0]["loop"]
-        else:
-            loop_times = 1
-            convert_info[1] = [[]] + convert_info[1]
+        loop_times = 1
+        entries = final_info
+        if isinstance(final_info[0], dict):
+            loop_times = final_info[0].get("loop")
+            entries = final_info[1:]
+        if not isinstance(loop_times, int) or loop_times < 1:
+            raise ConversionError("韵母循环次数无效")
 
-        for i in range(loop_times):
-            for j in range(1, len(convert_info[1])):
-                # 跳过某些特殊情况
-                if i == 0 and j == 1 and convert_info[0] and not convert_info[0][-1][1]:
+        for loop_index in range(loop_times):
+            for entry_index, entry in enumerate(entries):
+                if not isinstance(entry, list) or len(entry) < 4:
+                    raise ConversionError("韵母转换数据格式无效")
+                consonant, vowel, consonant_length, vowel_length = entry[:4]
+                is_bridge = len(entry) > 4 and entry[4] == "Bridge"
+                if (
+                    loop_index == 0
+                    and entry_index == 0
+                    and initial_info
+                    and isinstance(initial_info, list)
+                    and isinstance(initial_info[-1], list)
+                    and initial_info[-1][1] is None
+                ):
                     continue
-                if convert_info[1][j][-1] == "Bridge" and not convert_info[0]:
+                if is_bridge and initial_info is None:
                     continue
+                if not isinstance(vowel, str) or not isinstance(
+                    vowel_length, int | float
+                ):
+                    raise ConversionError("韵母元音转换数据格式无效")
 
-                result.append({})
-                if convert_info[1][j][0]:
-                    result[-1]["consonant"] = convert_info[1][j][0]
-                    result[-1]["consonantLength"] = (
-                        convert_info[1][j][2] + self.rand_len()
-                    )
+                mora: Mora = {
+                    "vowel": vowel,
+                    "vowelLength": vowel_length + self.rand_len(),
+                    "text": self._kana_for(consonant, vowel),
+                }
+                if consonant is not None:
+                    if not isinstance(consonant, str) or not isinstance(
+                        consonant_length, int | float
+                    ):
+                        raise ConversionError("韵母声母转换数据格式无效")
+                    mora["consonant"] = consonant
+                    mora["consonantLength"] = consonant_length + self.rand_len()
+                result.append(mora)
 
-                result[-1]["vowel"] = convert_info[1][j][1]
-                result[-1]["vowelLength"] = convert_info[1][j][3] + self.rand_len()
-
-                try:
-                    result[-1]["text"] = self.config.kana[
-                        result[-1]["consonant"] + result[-1]["vowel"]
-                    ]
-                except KeyError:
-                    result[-1]["text"] = self.config.kana[result[-1]["vowel"]]
-
+        if not result:
+            raise ConversionError("拼音未生成任何音素")
         return result
 
-    def convert_to_accent_phrase_without_pitch(self, sy: List) -> Dict[str, Any]:
-        """转换为无音高的重音短语"""
-        convert_info = [
-            self.config.shengYun_data["shengmu"][sy[0]] if sy[0] else None,
-            self.config.shengYun_data["yunmu"][sy[1]],
-            self.config.shengYun_data["yunmu"][sy[2]],
-            self.config.shengYun_data["yunmu"][sy[3]],
-        ]
+    def _kana_for(self, consonant: object, vowel: str) -> str:
+        key = f"{consonant or ''}{vowel}"
+        try:
+            kana = self.config.kana[key]
+        except KeyError as error:
+            raise ConversionError(f"缺少音素假名映射: {key!r}") from error
+        if not isinstance(kana, str):
+            raise ConversionError(f"音素假名映射无效: {key!r}")
+        return kana
 
-        result = {}
-        result["moras"] = (
-            self.convert_to_moras(convert_info[0:2])
-            + self.convert_to_moras([None, convert_info[2]])
-            + self.convert_to_moras([None, convert_info[3]])
-        )
-        result["accent"] = 1
-        result["isInterrogative"] = False
+    def convert_to_accent_phrase_without_pitch(
+        self, syllable: Sequence[str | None]
+    ) -> AccentPhrase:
+        """Create an accent phrase for one Pinyin syllable without pitch."""
 
-        return result
+        if len(syllable) != 4:
+            raise ConversionError("拼音必须拆分为一个声母和三个韵母")
+        initial, first, second, third = syllable
+        try:
+            initial_info = (
+                self.config.shengYun_data["shengmu"][initial] if initial else None
+            )
+            final_infos = [
+                self.config.shengYun_data["yunmu"][item]
+                for item in (first, second, third)
+            ]
+        except KeyError as error:
+            raise ConversionError(f"缺少声韵音素映射: {syllable!r}") from error
+
+        return {
+            "moras": self.convert_to_moras([initial_info, final_infos[0]])
+            + self.convert_to_moras([None, final_infos[1]])
+            + self.convert_to_moras([None, final_infos[2]]),
+            "accent": 1,
+            "isInterrogative": False,
+        }
 
     def tone_to_pitch(self, tone: int, step: float) -> float:
-        """声调转成音高"""
-        tone -= 1
+        """Map a Mandarin tone and normalized mora position to VOICEVOX pitch."""
+
+        if tone not in range(1, 6):
+            raise ConversionError(f"拼音声调必须在 1 到 5 之间，得到: {tone}")
+        if not 0 < step <= 1 + 1e-12:
+            raise ConversionError(f"音高位置必须在 (0, 1] 中，得到: {step}")
+        step = min(step, 1.0)
+
+        contour = self.config.shengDiao_data[tone - 1]
+        if (
+            not isinstance(contour, list)
+            or len(contour) != 3
+            or not all(isinstance(value, int | float) for value in contour)
+        ):
+            raise ConversionError(f"声调数据格式无效: {tone}")
+
         if step < 0.5:
-            pitch_step = (
-                self.config.shengDiao_data[tone][0]
-                + (
-                    self.config.shengDiao_data[tone][1]
-                    - self.config.shengDiao_data[tone][0]
-                )
-                * step
-                * 2
-                - 1
-            ) / 4
+            pitch_step = contour[0] + (contour[1] - contour[0]) * step * 2 - 1
         else:
-            pitch_step = (
-                self.config.shengDiao_data[tone][1]
-                + (
-                    self.config.shengDiao_data[tone][2]
-                    - self.config.shengDiao_data[tone][1]
-                )
-                * (step - 0.5)
-                * 2
-                - 1
-            ) / 4
-
-        pitch = (
-            ((self.config.pitchRange[1] - self.config.pitchRange[0]) * pitch_step)
+            pitch_step = contour[1] + (contour[2] - contour[1]) * (step - 0.5) * 2 - 1
+        pitch_step /= 4
+        return (
+            (self.config.pitchRange[1] - self.config.pitchRange[0]) * pitch_step
             + self.config.pitchRange[0]
-        ) + self.rand_pit()
+            + self.rand_pit()
+        )
 
-        return pitch
+    def add_pause_mora(self, accent_phrase: AccentPhrase) -> AccentPhrase:
+        """Attach a VOICEVOX pause mora to an accent phrase."""
 
-    def add_pause_mora(self, accent_phrase: Dict[str, Any]) -> Dict[str, Any]:
-        """添加停顿"""
         accent_phrase["pauseMora"] = {
             "text": "、",
             "vowel": "pau",
@@ -187,62 +276,160 @@ class SRSZWConverter:
         }
         return accent_phrase
 
-    def add_pitch(self, moras: List[Dict[str, Any]], tone: int) -> List[Dict[str, Any]]:
-        """添加音高"""
-        result = moras
-        ready_len = 0
-        full_len = 0
+    def add_pitch(self, moras: list[Mora], tone: int) -> list[Mora]:
+        """Apply the Mandarin tone contour to a phrase's moras."""
 
+        full_length = sum(float(mora["vowelLength"]) for mora in moras)
+        if full_length <= 0:
+            raise ConversionError("音素总时长必须大于零")
+
+        elapsed_length = 0.0
         for mora in moras:
-            full_len += mora["vowelLength"]
-
-        for i in range(len(moras)):
-            ready_len += moras[i]["vowelLength"]
-            step = ready_len / full_len
-            result[i]["pitch"] = self.tone_to_pitch(tone, step)
-
+            elapsed_length += float(mora["vowelLength"])
+            mora["pitch"] = self.tone_to_pitch(tone, elapsed_length / full_length)
             if tone == 5:
-                result[i]["vowelLength"] *= 0.6
-
-        return result
-
-    @staticmethod
-    def zi_to_pinyin(zi: str) -> List[str]:
-        """汉字转拼音"""
-        return (
-            " ".join(
-                pypy.lazy_pinyin(
-                    zi,
-                    style=pypy.Style.TONE3,
-                    strict=0,
-                    neutral_tone_with_five=True,
-                    tone_sandhi=True,
-                )
-            )
-        ).split(" ")
+                mora["vowelLength"] = float(mora["vowelLength"]) * 0.6
+        return moras
 
     @staticmethod
-    def generate_key() -> str:
-        """生成唯一键"""
-        return "600a4233-{:0>4x}-{:0>4x}-{:0>4x}-{:0>12x}".format(
-            rd.randint(0, 0xFFFF),
-            rd.randint(0, 0xFFFF),
-            rd.randint(0, 0xFFFF),
-            rd.randint(0, 0xFFFFFFFFFFFF),
+    def zi_to_pinyin(text: str) -> list[str]:
+        """Convert Chinese text to numbered Pinyin tokens and punctuation."""
+
+        if not text.strip():
+            raise ConversionError("文本不能为空")
+        return pypy.lazy_pinyin(
+            text,
+            style=pypy.Style.TONE3,
+            strict=False,
+            neutral_tone_with_five=True,
+            tone_sandhi=True,
         )
 
-    def convert(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
-        """转换项目数据为VOICEVOX项目格式"""
-        vvproj = {}
-        vvproj["appVersion"] = project_data["app_version"]
+    def accent_phrases_from_pinyin(self, tokens: Sequence[str]) -> list[AccentPhrase]:
+        """Convert numbered Pinyin and punctuation tokens to accent phrases."""
 
-        # 基础歌曲配置
-        vvproj["song"] = {
+        accent_phrases: list[AccentPhrase] = []
+        for token in tokens:
+            if not token or token.isspace():
+                continue
+            if all(character in _PUNCTUATION for character in token):
+                if accent_phrases:
+                    self.add_pause_mora(accent_phrases[-1])
+                continue
+            if not token[-1:].isdigit():
+                raise ConversionError(
+                    f"不支持的文本片段: {token!r}；请使用带声调数字的拼音或移除该片段"
+                )
+            tone = int(token[-1])
+            phrase = self.convert_to_accent_phrase_without_pitch(
+                self.get_sheng_yun(token)
+            )
+            phrase["moras"] = self.add_pitch(phrase["moras"], tone)
+            accent_phrases.append(phrase)
+        if not accent_phrases:
+            raise ConversionError("文本未包含可转换的中文或拼音音节")
+        return accent_phrases
+
+    def accent_phrases(self, text: str) -> list[AccentPhrase]:
+        """Convert Chinese text into VOICEVOX-compatible accent phrases."""
+
+        return self.accent_phrases_from_pinyin(self.zi_to_pinyin(text))
+
+    def generate_key(self) -> str:
+        """Generate a UUID suitable for legacy VVProj object keys.
+
+        A seeded converter derives keys from the same local random generator,
+        making complete legacy project documents reproducible in tests and
+        automation. Unseeded conversion continues to use random UUID4 values.
+        """
+
+        if self._seed is None:
+            from uuid import uuid4
+
+            return str(uuid4())
+        first = self._random.randint(0, 0xFFFF)
+        second = self._random.randint(0, 0xFFFF)
+        third = self._random.randint(0, 0xFFFF)
+        fourth = self._random.randint(0, 0xFFFFFFFFFFFF)
+        return f"600a4233-{first:0>4x}-{second:0>4x}-{third:0>4x}-{fourth:0>12x}"
+
+    def convert(self, project_data: JsonObject) -> JsonObject:
+        """Convert a legacy SRSZW project document into a VOICEVOX VVProj."""
+
+        app_version = project_data.get("app_version")
+        talks = project_data.get("talk")
+        if not isinstance(app_version, str) or not isinstance(talks, list):
+            raise ConversionError("工程必须包含字符串 app_version 和列表 talk")
+
+        vvproj: JsonObject = {
+            "appVersion": app_version,
+            "song": self._empty_song(),
+            "talk": {"audioKeys": [], "audioItems": {}},
+        }
+        audio_keys = vvproj["talk"]["audioKeys"]
+        audio_items = vvproj["talk"]["audioItems"]
+        assert isinstance(audio_keys, list)
+        assert isinstance(audio_items, dict)
+
+        for talk in talks:
+            if not isinstance(talk, dict):
+                raise ConversionError("talk 中的每项必须是对象")
+            text_data = talk.get("text")
+            if not isinstance(text_data, dict):
+                raise ConversionError("talk 项必须包含 text 对象")
+            text = text_data.get("zi")
+            pinyin = text_data.get("pinyin")
+            if not isinstance(text, str):
+                raise ConversionError("text.zi 必须是字符串")
+            if pinyin is not None and not isinstance(pinyin, str):
+                raise ConversionError("text.pinyin 必须为字符串或 null")
+
+            key = self.generate_key()
+            audio_keys.append(key)
+            audio_items[key] = {
+                "text": text,
+                "voice": self._legacy_voice(talk),
+                "query": {
+                    "accentPhrases": self.accent_phrases_from_pinyin(
+                        pinyin.split() if pinyin else self.zi_to_pinyin(text)
+                    ),
+                    "speedScale": self._talk_number(talk, "speedScale", 1.0),
+                    "pitchScale": self._talk_number(talk, "pitchScale", 0.0),
+                    "intonationScale": self._talk_number(talk, "intonationScale", 1.0),
+                    "volumeScale": self._talk_number(talk, "volumeScale", 1.0),
+                    "prePhonemeLength": self._talk_number(
+                        talk, "prePhonemeLength", 0.1
+                    ),
+                    "postPhonemeLength": self._talk_number(
+                        talk, "postPhonemeLength", 0.1
+                    ),
+                    "pauseLengthScale": self._talk_number(
+                        talk, "pauseLengthScale", 1.0
+                    ),
+                    "outputSamplingRate": 48000,
+                    "outputStereo": False,
+                    "kana": "",
+                },
+            }
+
+        return vvproj
+
+    @staticmethod
+    def _talk_number(talk: JsonObject, name: str, default: float) -> float:
+        value = talk.get(name, default)
+        if not isinstance(value, int | float):
+            raise ConversionError(f"talk.{name} 必须是数值")
+        return float(value)
+
+    @staticmethod
+    def _empty_song() -> JsonObject:
+        track_key = "725cfeb6-b161-49d3-b301-1042bceea90b"
+        return {
             "tpqn": 480,
             "tempos": [{"position": 0, "bpm": 120}],
             "timeSignatures": [{"measureNumber": 1, "beats": 4, "beatType": 4}],
             "tracks": {
-                "725cfeb6-b161-49d3-b301-1042bceea90b": {
+                track_key: {
                     "name": "無名トラック",
                     "singer": {
                         "engineId": "074fc39e-678b-4c13-8916-ffca8d505d1d",
@@ -258,86 +445,40 @@ class SRSZWConverter:
                     "pan": 0,
                 }
             },
-            "trackOrder": ["725cfeb6-b161-49d3-b301-1042bceea90b"],
+            "trackOrder": [track_key],
         }
 
-        vvproj["talk"] = {}
-        talk = project_data["talk"]
-        vvproj["talk"]["audioKeys"] = []
-        vvproj["talk"]["audioItems"] = {}
+    def _legacy_voice(self, talk: JsonObject) -> JsonObject:
+        character = talk.get("charactor")
+        style = talk.get("style")
+        if not isinstance(character, str):
+            raise ConversionError("talk.charactor 必须是字符串")
+        if style is not None and not isinstance(style, str):
+            raise ConversionError("talk.style 必须为字符串或 null")
 
-        for i in talk:
-            key = self.generate_key()
-            vvproj["talk"]["audioKeys"].append(key)
-            vvproj["talk"]["audioItems"][key] = {}
-            vvproj["talk"]["audioItems"][key]["text"] = str(i["text"]["zi"])
-
-            # 查找角色信息
-            charactor_id = None
-            style_id = None
-            engine_id = None
-
-            for charactor_data in self.config.charactors:
-                try:
-                    charactor_id = charactor_data[i["charactor"]]["id"]
-                    style_id = (
-                        charactor_data[i["charactor"]]["styles"][i["style"]]
-                        if i["style"]
-                        else charactor_data[i["charactor"]]["normalstyle"]
-                    )
-                    engine_id = charactor_data["engine_id"]
-                    break
-                except KeyError:
-                    continue
-
-            if charactor_id is None:
-                raise ValueError(f"未找到角色: {i['charactor']}")
-
-            vvproj["talk"]["audioItems"][key]["voice"] = {
+        for character_data in self.config.charactors:
+            character_info = character_data.get(character)
+            if not isinstance(character_info, dict):
+                continue
+            speaker_id = character_info.get("id")
+            styles = character_info.get("styles")
+            default_style = character_info.get("normalstyle")
+            engine_id = character_data.get("engine_id")
+            if not isinstance(speaker_id, str) or not isinstance(engine_id, str):
+                raise ConversionError(f"角色数据格式无效: {character!r}")
+            if style is None:
+                style_id = default_style
+            elif isinstance(styles, dict):
+                style_id = styles.get(style)
+            else:
+                style_id = None
+            if not isinstance(style_id, int):
+                raise ConversionError(f"未找到角色声线: {character!r}, {style!r}")
+            return {
                 "engineId": engine_id,
-                "speakerId": charactor_id,
+                "speakerId": speaker_id,
                 "styleId": style_id,
                 "presetKey": self.generate_key(),
             }
 
-            vvproj["talk"]["audioItems"][key]["query"] = {
-                "accentPhrases": [],
-                "speedScale": i["speedScale"],
-                "pitchScale": i["pitchScale"],
-                "intonationScale": i["intonationScale"],
-                "volumeScale": i["volumeScale"],
-                "prePhonemeLength": i["prePhonemeLength"],
-                "postPhonemeLength": i["postPhonemeLength"],
-                "pauseLengthScale": i["pauseLengthScale"],
-                "outputSamplingRate": 48000,
-                "outputStereo": False,
-                "kana": "",
-            }
-
-            accent_phrases = []
-
-            # 获取拼音
-            if i["text"]["pinyin"]:
-                pinyin = i["text"]["pinyin"].split(" ")
-            else:
-                pinyin = self.zi_to_pinyin(i["text"]["zi"])
-
-            # 处理每个拼音
-            for j in range(len(pinyin)):
-                if (
-                    pinyin[j] in ",./<>?:;'\"[]{}!@#$%^&*()_+~`=-|\\，。《》？：；‘’"
-                    "【】！￥……（）——+｜\\·「」、"
-                ):
-                    if accent_phrases:
-                        self.add_pause_mora(accent_phrases[-1])
-                else:
-                    sheng_yun = self.get_sheng_yun(pinyin[j])
-                    accent_p = self.convert_to_accent_phrase_without_pitch(sheng_yun)
-                    accent_p["moras"] = self.add_pitch(
-                        accent_p["moras"], int(pinyin[j][-1])
-                    )
-                    accent_phrases.append(accent_p)
-
-            vvproj["talk"]["audioItems"][key]["query"]["accentPhrases"] = accent_phrases
-
-        return vvproj
+        raise ConversionError(f"未找到角色: {character!r}")
