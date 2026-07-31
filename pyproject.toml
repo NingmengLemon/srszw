@@ -1,0 +1,40 @@
+
+[project]
+name = "srszw"
+version = "0.1.0"
+description = "VOICEVOX 中文跨语种自动生成脚本 -- 术人术中文"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "hooay233" }]
+keywords = ["voicevox", "tts", "chinese", "japanese", "cross-language"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: WTFPL License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = ["pypinyin>=0.48.0"]
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+srszw = "srszw.main:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["srszw"]
+
+[tool.setuptools.package-data]
+srszw_core = ["*.json"]
+
+[project.urls]
+Homepage = "https://github.com/hooay233/srszw"

@@ -1,10 +1,13 @@
 # VOICEVOX 中文跨语种自动生成脚本
 
 ## 介绍
+
 可使用拼音或汉字自动生成 VOICEVOX 中文跨语种调声
 
 ## 预编译版本
+>
 > 仅有 Windows, Linux, MacOS 的 x86_64 的预编译版本
+
 - GitHub:
 - - Windows: [下载](https://github.com/hooay233/srszw/releases/download/v0.1/srszw-0.1-win-built.zip)
 - - Linux: [下载](https://github.com/hooay233/srszw/releases/download/v0.1/srszw-0.1-gnu-built.zip)
@@ -19,18 +22,25 @@
 若无法运行，可尝试 [下面](#使用方法) 的方法运行
 
 ## 使用方法
+
 ### 下载项目
+
 1. 点击 [这里](https://gitee.com/hooay233/srszw-script/repository/archive/master.zip) 下载 zip
 2. 解压 zip
+
 ### 安装依赖
+
 1. 安装 [Python3](https://python.org)
 2. 安装 pypinyin
 在终端输入 `pip install pypinyin` 安装
+
 ### 运行
+
 1. 运行 `srszw.py`
 2. 用 VOICEVOX 打开 `output/output.vvproj`，如果能够正常打开，则说明生成成功
 
 ## 生成自己的文本的跨语种
+
 ### 1. 复制一份空模板
 
 复制 `./examples/empty.hooay-srszw.json` ，重命名为 `你的文件名.hooay-srszw.json`
@@ -38,30 +48,33 @@
 ### 2. 通过模板编辑
 
 打开 `你的文件名.hooay-srszw.json`，然后你将看到：
+
 ```json
 {
-	"script_version": "0.1",
-	"app_version": "0.23.0",
-	"talk": [
-		{
-			"charactor":"shikokumetan",
-			"style": null,
-			"speedScale": 1,
-			"pitchScale": 0,
-			"intonationScale": 1,
-			"volumeScale": 1,
-			"prePhonemeLength": 0.1,
-			"postPhonemeLength": 0.1,
-			"pauseLengthScale": 1,
-			"text": {
-				"pinyin": null,
-				"zi": "你要生成的文字"
-			}
-		}
-	]
+ "script_version": "0.1",
+ "app_version": "0.23.0",
+ "talk": [
+  {
+   "charactor":"shikokumetan",
+   "style": null,
+   "speedScale": 1,
+   "pitchScale": 0,
+   "intonationScale": 1,
+   "volumeScale": 1,
+   "prePhonemeLength": 0.1,
+   "postPhonemeLength": 0.1,
+   "pauseLengthScale": 1,
+   "text": {
+    "pinyin": null,
+    "zi": "你要生成的文字"
+   }
+  }
+ ]
 }
 ```
+
 一下是对各个项的解释：
+
 - `script_version`: 脚本版本，目前没有用
 - `app_version`: VOICEVOX 版本，一般情况下不需要修改
 - `talk`: 文本列表，存储每一个台词的信息，用 `,` 分割每个台词，用  `{` 和 `}` 包含每个台词
@@ -84,24 +97,27 @@
 ### 3. 更改配置文件
 
 打开 `config.json`，你将看到：
+
 ```json
 {
-	"file": "./examples/example1.hooay-srszw.json",
-	"output": "./output/output.vvproj",
-	"loaded_charactor_lists": [
-		"./charactors/vvx.json"
-	],
-	"yunMuSpliting": "./yunMuSpliting/spliting.json",
-	"zhengTiRenDu": "./zhengTiRenDu/zhenTiRenDu.json",
-	"shengDiao": "./shengDiao/puTongHuaShengDiao.json",
-	"shengYun": "./shengYunConvInfo/zh_in_jp1.json",
-	"noYW": false,
-	"pitchRange": [5.0, 6.0],
-	"pitchRandom": 0.02,
-	"lengthRandom": 0.001
+ "file": "./examples/example1.hooay-srszw.json",
+ "output": "./output/output.vvproj",
+ "loaded_charactor_lists": [
+  "./charactors/vvx.json"
+ ],
+ "yunMuSpliting": "./yunMuSpliting/spliting.json",
+ "zhengTiRenDu": "./zhengTiRenDu/zhenTiRenDu.json",
+ "shengDiao": "./shengDiao/puTongHuaShengDiao.json",
+ "shengYun": "./shengYunConvInfo/zh_in_jp1.json",
+ "noYW": false,
+ "pitchRange": [5.0, 6.0],
+ "pitchRandom": 0.02,
+ "lengthRandom": 0.001
 }
 ```
+
 以下是对各个项的解释：
+
 - `file`: 修改为你保存的 `.hooay-srszw.json` 文件的路径
 - `output`: 输出的 VOICEVOX 项目文件的位置
 - `loaded_charactor_lists`: 角色列表，默认只有 `vvx.json`，可添加其他基于 VOICEVOX 的引擎（例如 VOICEVOX NEMO）中的角色，需要自己转写，如果不需要其他引擎的角色，则不要修改
@@ -116,24 +132,54 @@
 
 修改之后保存
 
-###  4. 运行
-1. 运行 `srszw.py`
+### 4. 运行
+
+1. 运行 `python srszw.py`
 2. 用 VOICEVOX 打开输出的文件，如果能够正常打开，则说明生成成功
 
+## 新的使用方式
+
+### 命令行直接转换文本
+
+```bash
+# 直接转换文本
+python srszw.py --text "你好，这是测试文本" --output output/test.vvproj
+
+# 指定角色和声线
+python srszw.py --text "你好" --charactor zundamon --style normal --output output/test.vvproj
+```
+
+### Python API 使用
+
+```python
+from srszw_core import generate_from_string, generate_and_save
+
+# 生成VOICEVOX项目数据
+vvproj_data = generate_from_string("你好，世界！", charactor="shikokumetan")
+
+# 直接生成并保存文件
+generate_and_save("你好，世界！", "output/test.vvproj", charactor="zundamon")
+```
+
 ## 图形化界面
+
 ### webui
+
 1. 安装webui2
 运行 `pip install webui2` 进行安装
 2. 运行
 `python web-ui.py`
 
 ### tkinter
+
 运行 `python tk_ui.py`，有的系统可能要先安装tkinter
 
 > 注：
+>
 > - 有些浏览器的单独窗口运行无法弹出弹窗，可以复制终端中的链接用浏览器正常模式下打开
 > - 如果生成的朗读起来声音沙哑或无法发声，可尝试修改“音高”和“抑扬”
 > - 图形化界面的前端是我使用 AI 生成的，并手动修改 bug
 > - 本人代码水平并不好，欢迎批评，但也请保持友善
+>
 ----------
 > 本项目使用 WTFPL 协议，属于自由软件，可以自由使用，无需署名或专门授权。但该项目只负责生成项目文件，若使用 VOICEVOX 一类软件合成音频，仍需要遵循其协议

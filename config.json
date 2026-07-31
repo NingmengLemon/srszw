@@ -1,15 +1,18 @@
 {
-	"file": "./examples/example1.hooay-srszw.json",
-	"output": "./output/output.vvproj",
+	"file": "examples/bydppcds.hooay-srszw.json",
+	"output": "output/output.vvproj",
 	"loaded_charactor_lists": [
-		"./charactors/vvx.json"
+		"data/charactors/vvx.json"
 	],
-	"yunMuSpliting": "./yunMuSpliting/spliting.json",
-	"zhengTiRenDu": "./zhengTiRenDu/zhenTiRenDu.json",
-	"shengDiao": "./shengDiao/puTongHuaShengDiao.json",
-	"shengYun": "./shengYunConvInfo/zh_in_jp1.json",
+	"yunMuSpliting": "data/yunMuSpliting/spliting.json",
+	"zhengTiRenDu": "data/zhengTiRenDu/zhenTiRenDu.json",
+	"shengDiao": "data/shengDiao/puTongHuaShengDiao.json",
+	"shengYun": "data/shengYunConvInfo/zh_in_jp1.json",
 	"noYW": false,
-	"pitchRange": [5.5, 6.0],
+	"pitchRange": [
+		5.5,
+		6.0
+	],
 	"pitchRandom": 0.02,
 	"lengthRandom": 0.001
 }
