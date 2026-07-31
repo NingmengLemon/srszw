@@ -178,7 +178,7 @@ synthesizer.export_project(
 - CLI 子命令化：`srszw synthesize`、`srszw speakers`、`srszw query` 已落地于 [`srszw.cli`](../src/srszw/cli.py)，旧 flat 参数自动回退到兼容模式并提示迁移；`synthesize` 支持互斥的 `--text` / `--text-file`，并默认拒绝覆盖已有输出，除非显式指定 `--force`。
 - 新增 httpx MockTransport 单测与 `integration` 标记的真实 Engine 测试。已在本机 `127.0.0.1:50021` 端到端验证：`srszw synthesize --text "你好，世界。..." --speaker 3` 产出 283KB RIFF/WAVE 文件；`VVENGINE_URL` 集成测试通过。无效 JSON 响应会被封装为明确的 [`EngineProtocolError`](../src/srszw/engine.py:39)。
 
-下一步进入 M3：以 [`build_audio_query()`](../src/srszw/api.py:100) 为共享韵律来源，实现版本化 `VVProjExporter` 与 `export-project` 子命令，并重写 README。
+下一步进入 M3：以 [`build_audio_query()`](../src/srszw/api.py:78) 为共享韵律来源，实现版本化 `VVProjExporter` 与 `export-project` 子命令，并重写 README。
 
 ### M2：直接 TTS Engine 客户端
 
@@ -191,6 +191,18 @@ synthesizer.export_project(
 - 加入真实 Engine 集成测试标记，默认跳过；当 `VVENGINE_URL` 存在时，对本机 0.25.2 执行“中文 -> 查询 -> synthesis -> RIFF/WAVE 文件头”的端到端测试。
 
 验收：`srszw synthesize --text "你好，世界。" --speaker 3 --output hello.wav` 在当前 50021 引擎可生成非空 WAV。
+
+### M3 实施记录（2026-07-31）
+
+已完成基于 VOICEVOX `0.25.2` schema 的可编辑工程导出：
+
+- 新增 [`srszw.project`](../src/srszw/project.py) 的版本化 [`VVProjExporter`](../src/srszw/project.py:78)，未知 `app_version` 会被拒绝；`0.25.2` 导出结果包含最新项目 schema 所需的 `volumeEditData` 与 `phonemeTimingEditData`。
+- 新增 [`ProjectUtterance`](../src/srszw/project.py:58) / [`VoicevoxVoice`](../src/srszw/project.py:41) 公开模型；每条台词可覆盖全局 style ID 和 [`SynthesisOptions`](../src/srszw/models.py:66)。
+- [`ChineseSynthesizer.export_project()`](../src/srszw/api.py:170) 从真实 Engine 的 `/engine_manifest` 与 `/speakers` 解析 Engine / speaker UUID，并复用 [`build_audio_query()`](../src/srszw/api.py:78)，确保直接 TTS 和 VVProj 的音高短语同源。
+- CLI 新增 `srszw export-project`：支持互斥的 `--text`、`--text-file`、多条台词 `--input` JSON，保留 `--force` 覆盖保护和完整语音参数；详情见 [`README.md`](../README.md)。
+- 新增 [`tests/test_project_export.py`](../tests/test_project_export.py)，覆盖 schema、UUID voice、单段/多段覆盖、确定性 seed、未知版本、CLI 输入和输出保护；以本机 50021 Engine 实测导出了包含两条台词的 14KB VVProj。
+
+下一步进入 M4：先建立最小化透传代理骨架与日文直连对照测试，再按真实客户端流程定点实现中文 `/audio_query` 和 `/accent_phrases` 补丁。
 
 ### M3：工程导出与 CLI 收敛
 

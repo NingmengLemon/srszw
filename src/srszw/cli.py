@@ -1,8 +1,7 @@
-"""New subcommand CLI: direct TTS and query tooling.
+"""Command-line interface for direct TTS, query inspection and VVProj export.
 
-The ``srszw`` entry point gains ``synthesize``, ``speakers`` and ``query``
-subcommands in M2.  ``export-project`` follows in M3.  Flat legacy options
-are routed to the compatibility handler in :mod:`srszw.main`.
+Flat legacy options remain routed to the compatibility handler in
+:mod:`srszw.main`; all new functionality is exposed through subcommands.
 """
 
 from __future__ import annotations
@@ -15,9 +14,13 @@ from pathlib import Path
 
 from .api import ChineseSynthesizer, SynthesisOptions, build_audio_query
 from .engine import EngineError, VoicevoxClient
+from .project import ProjectUtterance
 
 DEFAULT_ENGINE_URL = "http://127.0.0.1:50021"
-_KNOWN_SUBCOMMANDS = frozenset({"synthesize", "speakers", "query"})
+DEFAULT_PROJECT_APP_VERSION = "0.25.2"
+_KNOWN_SUBCOMMANDS = frozenset(
+    {"synthesize", "speakers", "query", "export-project"}
+)
 
 
 def _add_common_engine_arguments(parser: argparse.ArgumentParser) -> None:
@@ -110,6 +113,81 @@ def _cmd_speakers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export_project(args: argparse.Namespace) -> int:
+    options = _options_from_args(args)
+    _ensure_writable_output(args.output, force=args.force)
+    if args.input is not None:
+        raw_items = json.loads(args.input.read_text(encoding="utf-8"))
+        if not isinstance(raw_items, list):
+            raise ValueError("--input 文件必须是 JSON 数组")
+        utterances = _utterances_from_json(raw_items)
+    else:
+        utterances = [ProjectUtterance(_read_text_input(args))]
+
+    with _new_client(args) as client:
+        synthesizer = ChineseSynthesizer(client, seed=args.seed)
+        output_path = synthesizer.export_project(
+            utterances,
+            args.output,
+            speaker=args.speaker,
+            options=options,
+            app_version=args.app_version,
+        )
+    print(f"已生成: {output_path}")
+    return 0
+
+
+def _utterances_from_json(raw_items: list[object]) -> list[ProjectUtterance]:
+    """Parse multi-utterance project input without exposing legacy schema."""
+
+    utterances: list[ProjectUtterance] = []
+    for index, raw_item in enumerate(raw_items, start=1):
+        if not isinstance(raw_item, dict):
+            raise ValueError(f"--input 第 {index} 项必须是 JSON 对象")
+        unsupported = set(raw_item).difference({"text", "speaker", "options"})
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise ValueError(f"--input 第 {index} 项包含未知字段: {names}")
+        text = raw_item.get("text")
+        speaker = raw_item.get("speaker")
+        raw_options = raw_item.get("options")
+        if not isinstance(text, str):
+            raise ValueError(f"--input 第 {index} 项的 text 必须是字符串")
+        if speaker is not None and (
+            not isinstance(speaker, int) or isinstance(speaker, bool)
+        ):
+            raise ValueError(f"--input 第 {index} 项的 speaker 必须是整数")
+        options = _options_from_json(raw_options, index)
+        utterances.append(ProjectUtterance(text, speaker=speaker, options=options))
+    return utterances
+
+
+def _options_from_json(raw_options: object, index: int) -> SynthesisOptions | None:
+    if raw_options is None:
+        return None
+    if not isinstance(raw_options, dict):
+        raise ValueError(f"--input 第 {index} 项的 options 必须是 JSON 对象")
+    valid_fields = {
+        "speed_scale",
+        "pitch_scale",
+        "intonation_scale",
+        "volume_scale",
+        "pre_phoneme_length",
+        "post_phoneme_length",
+        "pause_length_scale",
+        "output_sampling_rate",
+        "output_stereo",
+    }
+    unsupported = set(raw_options).difference(valid_fields)
+    if unsupported:
+        names = ", ".join(sorted(unsupported))
+        raise ValueError(f"--input 第 {index} 项 options 包含未知字段: {names}")
+    try:
+        return SynthesisOptions(**raw_options)
+    except TypeError as error:
+        raise ValueError(f"--input 第 {index} 项 options 无效: {error}") from error
+
+
 def _cmd_query(args: argparse.Namespace) -> int:
     options = _options_from_args(args)
     query = build_audio_query(
@@ -123,7 +201,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
 
 
 def build_subcommand_parser() -> argparse.ArgumentParser:
-    """Build the M2 subcommand parser (no legacy flat options)."""
+    """Build the current subcommand parser without legacy flat options."""
 
     parser = argparse.ArgumentParser(prog="srszw", description="SRSZW 中文 TTS")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -145,6 +223,38 @@ def build_subcommand_parser() -> argparse.ArgumentParser:
     _add_common_engine_arguments(synthesize)
     _add_synthesis_options(synthesize)
     synthesize.set_defaults(func=_cmd_synthesize)
+
+    export_project = subparsers.add_parser(
+        "export-project", help="导出可编辑的 VOICEVOX .vvproj 工程"
+    )
+    project_input = export_project.add_mutually_exclusive_group(required=True)
+    project_input.add_argument("--text", "-t", help="导出单条中文台词")
+    project_input.add_argument(
+        "--text-file", type=Path, help="读取 UTF-8 文件并导出单条台词"
+    )
+    project_input.add_argument(
+        "--input",
+        type=Path,
+        help="读取多条台词的 JSON 数组；每项可含 text、speaker、options",
+    )
+    export_project.add_argument(
+        "--speaker", type=int, help="默认 Engine style ID；可由 --input 项覆盖"
+    )
+    export_project.add_argument(
+        "--output", "-o", type=Path, required=True, help="输出 .vvproj 路径"
+    )
+    export_project.add_argument(
+        "--app-version",
+        default=DEFAULT_PROJECT_APP_VERSION,
+        help=f"VVProj schema 版本（默认 {DEFAULT_PROJECT_APP_VERSION}）",
+    )
+    export_project.add_argument(
+        "--force", action="store_true", help="允许覆盖已有输出文件"
+    )
+    export_project.add_argument("--seed", type=int, help="固定随机偏移与工程对象 ID")
+    _add_common_engine_arguments(export_project)
+    _add_synthesis_options(export_project)
+    export_project.set_defaults(func=_cmd_export_project)
 
     speakers = subparsers.add_parser("speakers", help="列出 Engine 角色")
     _add_common_engine_arguments(speakers)

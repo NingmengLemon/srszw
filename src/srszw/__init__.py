@@ -15,6 +15,12 @@ from typing import Any
 from .api import ChineseSynthesizer, SynthesisOptions, build_audio_query
 from .engine import EngineError, EngineHTTPError, EngineProtocolError, VoicevoxClient
 from .models import AccentPhrase, AudioQuery, Mora, PauseMora, Speaker, Speakers
+from .project import (
+    ProjectExportError,
+    ProjectUtterance,
+    VoicevoxVoice,
+    VVProjExporter,
+)
 from .srszw_core import Config, ConversionError, SRSZWConverter
 
 __version__ = "0.2.0"
@@ -28,12 +34,16 @@ __all__ = [
     "EngineHTTPError",
     "EngineProtocolError",
     "Mora",
+    "ProjectExportError",
+    "ProjectUtterance",
     "PauseMora",
     "SRSZWConverter",
     "Speaker",
     "Speakers",
     "SynthesisOptions",
+    "VVProjExporter",
     "VoicevoxClient",
+    "VoicevoxVoice",
     "build_audio_query",
     "generate_accent_phrases",
 ]

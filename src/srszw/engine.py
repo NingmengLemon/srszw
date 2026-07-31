@@ -141,6 +141,15 @@ class VoicevoxClient:
             raise EngineError("/speaker_info 必须返回 JSON 对象")
         return data
 
+    def engine_manifest(self) -> dict[str, Any]:
+        """Return Engine identity and capability metadata from ``/engine_manifest``."""
+
+        response = self._request("GET", "/engine_manifest")
+        data = self._json(response, "/engine_manifest")
+        if not isinstance(data, dict):
+            raise EngineError("/engine_manifest 必须返回 JSON 对象")
+        return data
+
     def synthesis(self, query: AudioQuery, speaker: int) -> bytes:
         """POST an AudioQuery to ``/synthesis`` and return the WAV bytes."""
 

@@ -6,7 +6,7 @@ SRSZW 是一个面向 Python 3.12 及以上版本的轻量级库和命令行工�
 >
 > 已验证 Engine：VOICEVOX Engine `0.25.2`
 >
-> 当前范围：离线中文韵律转换、直接 TTS、诊断查询及 Engine 角色查询。可编辑 `.vvproj` 导出和反向代理将在后续版本提供。
+> 当前范围：离线中文韵律转换、直接 TTS、诊断查询、Engine 角色查询与可编辑 `.vvproj` 导出。反向代理将在后续版本提供。
 
 ## 不包含的功能
 
@@ -72,6 +72,35 @@ uv run srszw synthesize --text-file input.txt --speaker 2 --output hello.wav
 
 为防止误覆盖，已有输出文件会使命令失败；明确覆盖时追加 `--force`。
 
+### 导出可编辑的 VVProj 工程
+
+导出器当前仅明确支持经 VOICEVOX UI `0.25.2` schema 核对的工程格式。它会从 Engine 查询实际的 Engine UUID 与 speaker UUID，复用直接合成的中文韵律转换，并为每个台词写入 voice 与 query。
+
+```cmd
+uv run srszw export-project --text "你好，世界。" --speaker 2 --output hello.vvproj
+```
+
+需要逐条指定声线或参数时，创建 UTF-8 JSON 数组：
+
+```json
+[
+  {"text": "你好。"},
+  {
+    "text": "世界！",
+    "speaker": 3,
+    "options": {"speed_scale": 1.15, "output_sampling_rate": 48000}
+  }
+]
+```
+
+然后以 `--speaker` 提供默认 style ID；输入项中的 `speaker` 与 `options` 会覆盖全局值：
+
+```cmd
+uv run srszw export-project --input utterances.json --speaker 2 --output project.vvproj --seed 7
+```
+
+`--text`、`--text-file` 与 `--input` 互斥。和 WAV 合成一样，已有输出默认拒绝覆盖，显式追加 `--force` 才会覆盖。
+
 ### 查看生成的 AudioQuery
 
 此命令不访问 Engine，只输出本地中文转换得到的 Engine 请求 JSON：
@@ -93,6 +122,24 @@ with VoicevoxClient("http://127.0.0.1:50021") as client:
     wav = synthesizer.synthesize("你好，世界。", speaker=2, options=options)
 
 Path("hello.wav").write_bytes(wav)
+```
+
+导出工程时使用 [`ProjectUtterance`](src/srszw/project.py) 表示每段台词；全局 `speaker` / `options` 可以被单段覆盖：
+
+```python
+from srszw import ProjectUtterance
+
+with VoicevoxClient("http://127.0.0.1:50021") as client:
+    synthesizer = ChineseSynthesizer(client, seed=7)
+    synthesizer.export_project(
+        [
+            ProjectUtterance("你好。"),
+            ProjectUtterance("世界！", speaker=3),
+        ],
+        "project.vvproj",
+        speaker=2,
+        app_version="0.25.2",
+    )
 ```
 
 如果只需要检查离线转换结果，可调用 `build_audio_query()` 或 `generate_accent_phrases()`；二者都不需要运行 Engine。
@@ -118,7 +165,7 @@ print(query["accent_phrases"])
 set VVENGINE_URL=http://127.0.0.1:50021 && uv run pytest -m integration
 ```
 
-测试覆盖离线转换、资源加载、HTTP MockTransport、CLI 文件输入和本机 Engine 的 WAV 合成闭环。
+测试覆盖离线转换、资源加载、HTTP MockTransport、CLI 文件输入、VVProj schema 结构、每段 voice/options 覆盖，以及本机 Engine 的 WAV 合成闭环。
 
 ## 许可证与 VOICEVOX
 

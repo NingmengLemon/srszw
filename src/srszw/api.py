@@ -7,12 +7,23 @@ bridges the two so callers only ever see stable public options.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .engine import VoicevoxClient
-from .models import AccentPhrase, AudioQuery, Mora, PauseMora
+from .models import (
+    AccentPhrase,
+    AudioQuery,
+    Mora,
+    PauseMora,
+    Speakers,
+    SynthesisOptions,
+)
+
+if TYPE_CHECKING:
+    from .project import ProjectUtterance, VoicevoxVoice
 from .srszw_core import Config
 from .srszw_core.converter import SRSZWConverter
 
@@ -22,38 +33,6 @@ __all__ = [
     "build_audio_query",
     "to_engine_query",
 ]
-
-
-@dataclass(frozen=True)
-class SynthesisOptions:
-    """Voice parameters shared by query preparation and synthesis."""
-
-    speed_scale: float = 1.0
-    pitch_scale: float = 0.0
-    intonation_scale: float = 1.0
-    volume_scale: float = 1.0
-    pre_phoneme_length: float = 0.1
-    post_phoneme_length: float = 0.1
-    pause_length_scale: float = 1.0
-    output_sampling_rate: int = 24000
-    output_stereo: bool = False
-
-    def as_engine_query_fields(self) -> dict[str, Any]:
-        """Return the non-accent fields expected by the Engine AudioQuery."""
-
-        return {
-            "speedScale": self.speed_scale,
-            "pitchScale": self.pitch_scale,
-            "intonationScale": self.intonation_scale,
-            "volumeScale": self.volume_scale,
-            "prePhonemeLength": self.pre_phoneme_length,
-            "postPhonemeLength": self.post_phoneme_length,
-            "pauseLength": None,
-            "pauseLengthScale": self.pause_length_scale,
-            "outputSamplingRate": self.output_sampling_rate,
-            "outputStereo": self.output_stereo,
-            "kana": "",
-        }
 
 
 DEFAULT_OPTIONS = SynthesisOptions()
@@ -183,3 +162,67 @@ class ChineseSynthesizer:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(wav_bytes)
         return path
+
+    def export_project(
+        self,
+        utterances: Sequence[ProjectUtterance],
+        output_path: str | Path,
+        *,
+        speaker: int | None = None,
+        options: SynthesisOptions = DEFAULT_OPTIONS,
+        app_version: str = "0.25.2",
+    ) -> Path:
+        """Export an editable VVProj using the same conversion as synthesis.
+
+        ``speaker`` and ``options`` are global defaults. Individual
+        :class:`~srszw.ProjectUtterance` objects may override either setting.
+        Voice UUIDs are obtained from the connected Engine, ensuring each talk
+        item identifies the real speaker behind its requested style ID.
+        """
+
+        from .project import VVProjExporter
+
+        manifest = self._client.engine_manifest()
+        engine_id = manifest.get("uuid")
+        if not isinstance(engine_id, str) or not engine_id:
+            raise ValueError("/engine_manifest 未返回有效的 Engine UUID")
+        exporter = VVProjExporter(app_version=app_version, seed=self._seed)
+        project = exporter.export(
+            utterances,
+            self._voices_by_style(self._client.speakers(), engine_id),
+            default_speaker=speaker,
+            default_options=options,
+            build_query=lambda text, item_options: build_audio_query(
+                text,
+                item_options,
+                config=self._config,
+                seed=self._seed,
+            ),
+        )
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(project, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return path
+
+    @staticmethod
+    def _voices_by_style(
+        speakers: Speakers, engine_id: str
+    ) -> dict[int, VoicevoxVoice]:
+        """Build a talk-style lookup from an Engine speaker catalog."""
+
+        from .project import VoicevoxVoice
+
+        voices: dict[int, VoicevoxVoice] = {}
+        for speaker in speakers:
+            for style in speaker["styles"]:
+                if style["type"] != "talk":
+                    continue
+                voices[style["id"]] = VoicevoxVoice(
+                    engine_id=engine_id,
+                    speaker_id=speaker["speaker_uuid"],
+                    style_id=style["id"],
+                )
+        return voices
