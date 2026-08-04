@@ -73,10 +73,15 @@ def _run_legacy(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch to the new subcommands or the legacy flat command."""
+    """Dispatch to new subcommands or the legacy flat command.
+
+    No argument and top-level help intentionally use the current subcommand
+    parser. The transitional parser remains available only when an actual
+    legacy flat option is supplied.
+    """
 
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in _KNOWN_SUBCOMMANDS:
+    if not raw_argv or raw_argv[0] in _KNOWN_SUBCOMMANDS | {"-h", "--help"}:
         return run_subcommand(raw_argv)
 
     if raw_argv:

@@ -130,6 +130,20 @@ def test_invalid_json_response_becomes_protocol_error() -> None:
             client.version()
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"speed_scale": float("nan")},
+        {"output_sampling_rate": True},
+        {"output_sampling_rate": 0},
+        {"output_stereo": 1},
+    ],
+)
+def test_synthesis_options_reject_invalid_values(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        SynthesisOptions(**kwargs)  # type: ignore[arg-type]
+
+
 def test_cli_query_emits_json(capsys: pytest.CaptureFixture[str]) -> None:
     from srszw.cli import run_subcommand
 

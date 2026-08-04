@@ -9,6 +9,7 @@ camelCase VVProj document produced by the offline converter.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Literal, NotRequired, TypedDict
 
 
@@ -77,6 +78,42 @@ class SynthesisOptions:
     pause_length_scale: float = 1.0
     output_sampling_rate: int = 24000
     output_stereo: bool = False
+
+    def __post_init__(self) -> None:
+        """Reject invalid values before a malformed query reaches the Engine."""
+
+        numeric_fields = {
+            "speed_scale": self.speed_scale,
+            "pitch_scale": self.pitch_scale,
+            "intonation_scale": self.intonation_scale,
+            "volume_scale": self.volume_scale,
+            "pre_phoneme_length": self.pre_phoneme_length,
+            "post_phoneme_length": self.post_phoneme_length,
+            "pause_length_scale": self.pause_length_scale,
+        }
+        for name, value in numeric_fields.items():
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError(f"{name} 必须是数值")
+            if not isfinite(value):
+                raise ValueError(f"{name} 必须是有限数值")
+        for name in (
+            "speed_scale",
+            "intonation_scale",
+            "volume_scale",
+            "pre_phoneme_length",
+            "post_phoneme_length",
+            "pause_length_scale",
+        ):
+            if numeric_fields[name] < 0:
+                raise ValueError(f"{name} 不能为负数")
+        if isinstance(self.output_sampling_rate, bool) or not isinstance(
+            self.output_sampling_rate, int
+        ):
+            raise ValueError("output_sampling_rate 必须是整数")
+        if self.output_sampling_rate <= 0:
+            raise ValueError("output_sampling_rate 必须大于零")
+        if not isinstance(self.output_stereo, bool):
+            raise ValueError("output_stereo 必须是布尔值")
 
     def as_engine_query_fields(self) -> dict[str, Any]:
         """Return the non-accent fields expected by an Engine AudioQuery."""

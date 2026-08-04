@@ -15,11 +15,12 @@ from pathlib import Path
 from .api import ChineseSynthesizer, SynthesisOptions, build_audio_query
 from .engine import EngineError, VoicevoxClient
 from .project import ProjectUtterance
+from .proxy import ProxyConfig, ProxyDependencyError, run_proxy
 
 DEFAULT_ENGINE_URL = "http://127.0.0.1:50021"
 DEFAULT_PROJECT_APP_VERSION = "0.25.2"
 _KNOWN_SUBCOMMANDS = frozenset(
-    {"synthesize", "speakers", "query", "export-project"}
+    {"synthesize", "speakers", "query", "export-project", "proxy"}
 )
 
 
@@ -188,6 +189,23 @@ def _options_from_json(raw_options: object, index: int) -> SynthesisOptions | No
         raise ValueError(f"--input 第 {index} 项 options 无效: {error}") from error
 
 
+def _cmd_proxy(args: argparse.Namespace) -> int:
+    """Run the optional Mandarin-compatible VOICEVOX reverse proxy."""
+
+    run_proxy(
+        listen=args.listen,
+        config=ProxyConfig(
+            upstream_url=args.upstream,
+            mode=args.mode,
+            timeout=args.timeout,
+            max_body_bytes=args.max_body_bytes,
+            seed=args.seed,
+        ),
+        log_level=args.log_level,
+    )
+    return 0
+
+
 def _cmd_query(args: argparse.Namespace) -> int:
     options = _options_from_args(args)
     query = build_audio_query(
@@ -261,6 +279,47 @@ def build_subcommand_parser() -> argparse.ArgumentParser:
     speakers.add_argument("--json", action="store_true", help="以 JSON 输出")
     speakers.set_defaults(func=_cmd_speakers)
 
+    proxy = subparsers.add_parser(
+        "proxy",
+        help="启动可选的中文适配 VOICEVOX 反向代理",
+    )
+    proxy.add_argument(
+        "--listen",
+        required=True,
+        help="代理监听地址，格式为 HOST:PORT 或 [IPv6]:PORT",
+    )
+    proxy.add_argument(
+        "--upstream",
+        default=DEFAULT_ENGINE_URL,
+        help=f"上游 VOICEVOX Engine 地址（默认 {DEFAULT_ENGINE_URL}）",
+    )
+    proxy.add_argument(
+        "--mode",
+        choices=("auto", "off", "force"),
+        default="auto",
+        help="补丁模式：auto（默认）、off（仅透传）或 force（强制补丁）",
+    )
+    proxy.add_argument("--timeout", type=float, default=30.0, help="上游 HTTP 超时秒数")
+    proxy.add_argument(
+        "--max-body-bytes",
+        type=int,
+        default=16 * 1024 * 1024,
+        help="允许缓冲的最大请求体字节数（默认 16777216）",
+    )
+    proxy.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="中文韵律随机偏移 seed（默认 0，保证同一请求可复现）",
+    )
+    proxy.add_argument(
+        "--log-level",
+        choices=("critical", "error", "warning", "info", "debug"),
+        default="info",
+        help="Uvicorn 日志级别",
+    )
+    proxy.set_defaults(func=_cmd_proxy)
+
     query = subparsers.add_parser("query", help="输出本地生成的 AudioQuery JSON")
     query.add_argument("--text", "-t", required=True, help="要转换的中文文本")
     query.add_argument("--seed", type=int, help="固定随机偏移，便于复现")
@@ -277,6 +336,6 @@ def run_subcommand(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (EngineError, ValueError, OSError) as error:
+    except (EngineError, ProxyDependencyError, ValueError, OSError) as error:
         print(f"错误: {error}", file=sys.stderr)
         return 1

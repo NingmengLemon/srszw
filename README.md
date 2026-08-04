@@ -6,7 +6,7 @@ SRSZW 是一个面向 Python 3.12 及以上版本的轻量级库和命令行工�
 >
 > 已验证 Engine：VOICEVOX Engine `0.25.2`
 >
-> 当前范围：离线中文韵律转换、直接 TTS、诊断查询、Engine 角色查询与可编辑 `.vvproj` 导出。反向代理将在后续版本提供。
+> 当前范围：离线中文韵律转换、直接 TTS、诊断查询、Engine 角色查询、可编辑 `.vvproj` 导出，以及可选的中文适配反向代理。
 
 ## 不包含的功能
 
@@ -38,6 +38,18 @@ uv run ruff check . && uv run pyright && uv run pytest
 
 ```cmd
 uv pip install .
+```
+
+需要运行反向代理时，安装可选依赖：
+
+```cmd
+uv sync --extra proxy
+```
+
+已发布包可使用：
+
+```cmd
+pip install "srszw[proxy]"
 ```
 
 ## 命令行
@@ -100,6 +112,26 @@ uv run srszw export-project --input utterances.json --speaker 2 --output project
 ```
 
 `--text`、`--text-file` 与 `--input` 互斥。和 WAV 合成一样，已有输出默认拒绝覆盖，显式追加 `--force` 才会覆盖。
+
+### 作为 VOICEVOX Engine 的中文适配反向代理
+
+反向代理是可选功能；它可让依赖标准 VOICEVOX HTTP API 的客户端改用代理地址。`auto` 模式仅在 `POST /audio_query` 和 `POST /accent_phrases` 的文本包含汉字且不含日文假名时，改用本地中文韵律转换；其余路径、日文文本、合成请求和未登记接口均透传到上游 Engine。
+
+先安装 `proxy` extra，再以一个未被占用的本地端口启动：
+
+```cmd
+uv run srszw proxy --listen 127.0.0.1:50023 --upstream http://127.0.0.1:50021
+```
+
+然后令兼容客户端连接 `http://127.0.0.1:50023`。代理默认允许 VOICEVOX Desktop 的 `app://.` renderer origin；仍建议监听在 `127.0.0.1` 或 `::1`，不要将未鉴权的代理端口暴露到局域网或公网。
+
+可选参数：
+
+- `--mode auto`（默认）仅处理明显中文；`--mode off` 强制全透传；`--mode force` 强制处理两个中文补丁接口，适合已由调用方确认文本是中文的场景。
+- `--timeout 30` 配置上游 HTTP 超时；`--max-body-bytes 16777216` 限制缓冲请求体，超限返回 HTTP 413。
+- `--log-level warning` 控制 Uvicorn 日志级别。默认日志不会记录请求文本。
+
+代理仅替换查询阶段，`/synthesis` 会按原样接收调用方提交的 `AudioQuery` 并流式转发音频。因此中文流程应始终先通过代理取得查询，再将得到的完整查询提交给同一代理地址。
 
 ### 查看生成的 AudioQuery
 
@@ -165,7 +197,7 @@ print(query["accent_phrases"])
 set VVENGINE_URL=http://127.0.0.1:50021 && uv run pytest -m integration
 ```
 
-测试覆盖离线转换、资源加载、HTTP MockTransport、CLI 文件输入、VVProj schema 结构、每段 voice/options 覆盖，以及本机 Engine 的 WAV 合成闭环。
+测试覆盖离线转换、资源加载、HTTP MockTransport、CLI 文件输入、VVProj schema 结构、每段 voice/options 覆盖、可选代理的中文补丁/透传/流式响应，以及本机 Engine 的 WAV 合成闭环。
 
 ## 许可证与 VOICEVOX
 

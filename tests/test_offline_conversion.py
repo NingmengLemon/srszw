@@ -38,6 +38,24 @@ def test_seed_makes_conversion_reproducible() -> None:
     assert first != different_seed
 
 
+def test_large_duration_randomness_never_creates_nonpositive_moras() -> None:
+    """Custom legacy randomness must not yield invalid Engine durations."""
+
+    phrases = generate_accent_phrases("你好。", config=Config(lengthRandom=1.0), seed=1)
+    lengths = [
+        mora["vowelLength"]
+        for phrase in phrases
+        for mora in phrase["moras"]
+    ]
+    lengths.extend(
+        phrase["pauseMora"]["vowelLength"]
+        for phrase in phrases
+        if "pauseMora" in phrase
+    )
+
+    assert all(length > 0 for length in lengths)
+
+
 def test_punctuation_adds_pause_to_preceding_phrase() -> None:
     """Chinese punctuation should become a pause without creating a phrase."""
 

@@ -18,6 +18,7 @@ AccentPhrase = JsonObject
 _PUNCTUATION = frozenset(
     ",./<>?:;'\"[]{}!@#$%^&*()_+~`=-|\\，。《》？：；‘’【】！￥……（）——+｜\\·「」、"
 )
+_MIN_MORA_LENGTH = 0.001
 
 
 class ConversionError(ValueError):
@@ -44,6 +45,11 @@ class SRSZWConverter:
         """Return a configured random mora-duration offset."""
 
         return self._random.uniform(-self.config.lengthRandom, self.config.lengthRandom)
+
+    def _randomized_length(self, length: int | float) -> float:
+        """Apply duration variation while keeping every mora duration positive."""
+
+        return max(_MIN_MORA_LENGTH, float(length) + self.rand_len())
 
     def rand_pit(self) -> float:
         """Return a configured random pitch offset."""
@@ -145,9 +151,9 @@ class SRSZWConverter:
                 result.append(
                     {
                         "consonant": consonant,
-                        "consonantLength": consonant_length + self.rand_len(),
+                        "consonantLength": self._randomized_length(consonant_length),
                         "vowel": resolved_vowel,
-                        "vowelLength": resolved_vowel_length + self.rand_len(),
+                        "vowelLength": self._randomized_length(resolved_vowel_length),
                         "text": self._kana_for(consonant, resolved_vowel),
                     }
                 )
@@ -184,7 +190,7 @@ class SRSZWConverter:
 
                 mora: Mora = {
                     "vowel": vowel,
-                    "vowelLength": vowel_length + self.rand_len(),
+                    "vowelLength": self._randomized_length(vowel_length),
                     "text": self._kana_for(consonant, vowel),
                 }
                 if consonant is not None:
@@ -193,7 +199,7 @@ class SRSZWConverter:
                     ):
                         raise ConversionError("韵母声母转换数据格式无效")
                     mora["consonant"] = consonant
-                    mora["consonantLength"] = consonant_length + self.rand_len()
+                    mora["consonantLength"] = self._randomized_length(consonant_length)
                 result.append(mora)
 
         if not result:
@@ -271,7 +277,7 @@ class SRSZWConverter:
         accent_phrase["pauseMora"] = {
             "text": "、",
             "vowel": "pau",
-            "vowelLength": 0.3 + self.rand_len(),
+            "vowelLength": self._randomized_length(0.3),
             "pitch": 0,
         }
         return accent_phrase

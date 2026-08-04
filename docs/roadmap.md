@@ -1,8 +1,31 @@
 # SRSZW 改造路线图
 
-> 状态：提案  
-> 适用版本：0.2.0 起  
-> 最后核对：2026-07-31
+> 状态：M0–M3 已实现，M4 未开始
+> 适用版本：0.2.0 起
+> 最后核对：2026-08-01
+
+> 维护状态（2026-08-01）：M4 最小代理已完成实现、完整回归和本机 Engine/VOICEVOX Desktop 验证。
+
+## 0. 接管审计（2026-08-01）
+
+本节记录对当前 `dev` HEAD（`fa04d23`）的独立复核结果，避免将此前实施记录与本次实际验证混淆。
+
+| 项目 | 审计结论 |
+| --- | --- |
+| M0/M1 离线转换与资源打包 | 已实现。转换数据已在包内，默认转换不依赖工作目录；遗留配置/工程导出仍作为兼容层保留。 |
+| M2 直接 TTS | 已实现代码、CLI 和 mock 覆盖；`VoicevoxClient`、`ChineseSynthesizer`、`srszw synthesize` / `speakers` / `query` 均存在。 |
+| M3 VVProj 导出 | 已实现代码、CLI 和 schema 结构测试；导出器当前严格限定为 `0.25.2`，并通过 Engine 查询 UUID/角色信息。 |
+| 自动化质量门禁 | 本次通过：`uv run pytest` 为 22 passed、1 skipped；Ruff 和 Pyright 均通过；`uv build` 成功生成 sdist 与 wheel。 |
+| 本机 Engine 集成验证 | 已于 2026-08-01 复验通过。`set VVENGINE_URL=http://127.0.0.1:50021&& uv run pytest -m integration` 通过（1 passed）；真实 CLI 角色查询返回 127 个 style，`synthesize` 对“你好，世界。”以 style ID 2 生成 104,492 字节的 RIFF/WAVE，`export-project` 生成一条台词的 `0.25.2` VVProj。此前的 `WinError 10061` 是计算机重启后 Engine 未启动导致，服务恢复后不再复现。 |
+| M3 的 UI 可打开性 | 已于 2026-08-01 完成人工验收：在 VOICEVOX 中打开 `review-project.vvproj` 后显示正常且能够正确播放。结合 JSON schema、真实 Engine 发现及 CLI smoke test，M3 当前验收通过。 |
+| M4 反向代理 | 未开始。当前源码、依赖声明和 CLI 都不存在 `proxy` 实现；路线图中的 M4 仍是设计，而非已交付功能。 |
+
+### 接下来应优先处理
+
+1. 修正顶层 `srszw --help`：它目前落入遗留 flat CLI、输出旧参数并写入迁移提示；顶层帮助应展示新子命令，遗留入口只在明确使用旧参数时触发。
+2. 在开始 M4 前补齐客户端边界测试（超时拆分配置、无效/非 WAV 合成响应、语音参数校验），再以日语透传对照测试建立代理护栏。
+3. 实现 M4 时将 ASGI 依赖放入 `proxy` optional extra，并先只实现 `/audio_query`、`/accent_phrases` 的中文定点补丁；合成及未知接口保持原样透传。
+4. 若要自动化 UI 验证，可让 VOICEVOX 以 Chromium 远程调试端口启动，并由 Playwright/CDP 只读检查项目是否加载、台词是否存在及播放控制状态；不要将 UI 自动化作为核心库的默认测试依赖。
 
 ## 1. 愿景与边界
 
@@ -109,7 +132,7 @@ synthesizer.export_project(
 | `srszw export-project` | 生成可编辑的 `.vvproj`。 | `--text` / `--input`、`--speaker`、`--output`、语音参数、`--app-version`。 |
 | `srszw speakers` | 显示当前 Engine 的角色和 style ID。 | `--engine-url`、`--json`。 |
 | `srszw query` | 输出本地生成的 `AudioQuery` JSON，用于诊断、调参和代理测试。 | `--text`、`--speaker`、语音参数。 |
-| `srszw proxy`（后续 optional extra） | 启动中文适配反向代理。 | `--listen`、`--upstream`、`--mode`、`--log-level`。 |
+| `srszw proxy`（optional extra） | 启动中文适配反向代理。 | `--listen`、`--upstream`、`--mode`、`--seed`、`--log-level`。 |
 
 输入互斥规则：`--text`、`--text-file` 和项目输入文件三者只允许一个。WAV 或工程输出目录不存在时自动创建；同名文件默认拒绝覆盖，使用 `--force` 才允许覆盖。错误写入 stderr，并使用稳定的非零退出码。
 
@@ -119,7 +142,7 @@ synthesizer.export_project(
 
 - 基础运行依赖：保留 `pypinyin`，新增 `httpx` 用于 HTTP 客户端。
 - 开发依赖组：`pytest`、`pytest-httpx` 或 `respx`、`ruff`、`pyright`；全部由 uv 管理。
-- 可选代理 extra：选择轻量 ASGI 实现（建议 `starlette` + `uvicorn`），只在 `srszw[proxy]` 时安装。
+- 可选代理 extra：使用轻量 ASGI 实现 `starlette` + `uvicorn`，只在 `srszw[proxy]` 时安装。
 - 不引入大型 CLI 框架、ORM 或通用配置框架；初期继续使用标准库 `argparse`。
 
 ### 打包修复
@@ -236,6 +259,17 @@ synthesizer.export_project(
 代理必须为 upstream 不可达、超时、无效 JSON、body 过大和客户端取消请求定义行为。日志默认不记录完整文本；诊断模式可记录长度、命中规则和关联 ID。
 
 验收：普通日语 `audio_query` 的代理响应与直接访问 upstream 在语义上相同；中文 `audio_query` 后接 `synthesis` 能产生 WAV；未登记接口的状态码和响应体不被代理篡改。
+
+### M4 实施记录（2026-08-01）
+
+本轮实现了最小、可选安装的中文兼容反向代理：
+
+- [`srszw.proxy`](../src/srszw/proxy.py) 提供 [`ProxyConfig`](../src/srszw/proxy.py:52)、[`create_proxy_app()`](../src/srszw/proxy.py:219) 和 [`run_proxy()`](../src/srszw/proxy.py:377)。[`pyproject.toml`](../pyproject.toml) 新增 `srszw[proxy]` extra，基础 TTS 安装不引入 Starlette/Uvicorn。
+- [`srszw proxy`](../src/srszw/cli.py:192) 通过 `--listen`、`--upstream`、`--mode`、`--timeout`、`--max-body-bytes`、`--seed`、`--log-level` 启动；`auto` 仅处理无日文假名的汉字文本，`off` 强制全透传，`force` 用于显式兼容场景。默认 seed 为 `0`，避免同一请求得到随机变化的时值/音高，调用方可显式覆盖。
+- `POST /audio_query` 先向 upstream 请求种子查询以保留引擎默认参数，再替换本地中文 `accent_phrases`；`POST /accent_phrases` 直接返回本地中文短语。`/synthesis`、`/mora_*`、能力发现和未知路径保持方法、路径、重复查询参数、请求体及端到端响应头/状态码透传，二进制响应流式转发。
+- 代理拒绝超限请求体（413），upstream 不可达返回 502；跳过 hop-by-hop headers。为 VOICEVOX Electron renderer 允许 `app://.` CORS origin，因此可直接将桌面端的 Engine URL 指向本地代理。
+- [`tests/test_proxy.py`](../tests/test_proxy.py) 覆盖中文两个补丁、日文/`off` 透传、二进制响应、重复查询参数、连接失败、body 限制和 IPv6 监听地址。使用 DevTools 连接的 VOICEVOX Desktop 实测：代理 `50024` 对中文 `audio_query` 返回 4 个短语，后续 `synthesis` 返回 106,540 字节 RIFF/WAVE；日语 `audio_query` 与直接访问 `50021` 完全相同。
+- 同时修正 [`main()`](../src/srszw/main.py:75)：顶层 `srszw --help` 和无参调用现在展示新子命令，而旧扁平参数仍走兼容入口。
 
 ### M5：兼容性、发布与维护
 
